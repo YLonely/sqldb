@@ -51,8 +51,8 @@ type Model[T any] struct {
 
 var _ sqldb.Model[struct{}] = Model[struct{}]{}
 
-func NewModel[T any](db *gorm.DB) *Model[T] {
-	return &Model[T]{
+func NewModel[T any](db *gorm.DB) Model[T] {
+	return Model[T]{
 		ColumnHint: sqldb.NewModel[T](buildNameColumnFunc(db)),
 		db:         db,
 	}
