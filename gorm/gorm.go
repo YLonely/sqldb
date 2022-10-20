@@ -24,7 +24,7 @@ func WithTransaction(ctx context.Context, tx *gorm.DB) context.Context {
 	return context.WithValue(ctx, transactionContextKey, tx)
 }
 
-func RetrieveTransaction(ctx context.Context) *gorm.DB {
+func TransactionFrom(ctx context.Context) *gorm.DB {
 	if obj := ctx.Value(transactionContextKey); obj != nil {
 		return obj.(*gorm.DB)
 	}
@@ -33,7 +33,7 @@ func RetrieveTransaction(ctx context.Context) *gorm.DB {
 
 func NewTransactionFunc(db *gorm.DB) sqldb.TransactionFunc {
 	return func(ctx context.Context, run func(context.Context) error) error {
-		if tx := RetrieveTransaction(ctx); tx != nil {
+		if tx := TransactionFrom(ctx); tx != nil {
 			return tx.Transaction(func(tx *gorm.DB) error {
 				return run(WithTransaction(ctx, tx))
 			})
@@ -78,7 +78,7 @@ func buildNameColumnFunc(db *gorm.DB) sqldb.NameColumnFunc {
 }
 
 func (m Model[T]) dbInstance(ctx context.Context) *gorm.DB {
-	if tx := RetrieveTransaction(ctx); tx != nil {
+	if tx := TransactionFrom(ctx); tx != nil {
 		return tx.WithContext(ctx)
 	}
 	return m.db
