@@ -31,6 +31,7 @@ func TransactionFrom(ctx context.Context) *gorm.DB {
 	return nil
 }
 
+// NewTransactionFunc returns a TransactionFunc.
 func NewTransactionFunc(db *gorm.DB) sqldb.TransactionFunc {
 	return func(ctx context.Context, run func(context.Context) error) error {
 		if tx := TransactionFrom(ctx); tx != nil {
@@ -44,6 +45,7 @@ func NewTransactionFunc(db *gorm.DB) sqldb.TransactionFunc {
 	}
 }
 
+// Model implements the sqldb.Model interface.
 type Model[T any] struct {
 	sqldb.ColumnHint[T]
 	db *gorm.DB
@@ -51,14 +53,15 @@ type Model[T any] struct {
 
 var _ sqldb.Model[struct{}] = Model[struct{}]{}
 
+// NewModel returns a new Model.
 func NewModel[T any](db *gorm.DB) Model[T] {
 	return Model[T]{
-		ColumnHint: sqldb.NewModel[T](buildNameColumnFunc(db)),
+		ColumnHint: sqldb.NewColumnHint[T](buildNameColumnFunc(db)),
 		db:         db,
 	}
 }
 
-func buildNameColumnFunc(db *gorm.DB) sqldb.NameColumnFunc {
+func buildNameColumnFunc(db *gorm.DB) sqldb.NameFieldFunc {
 	return func(sf reflect.StructField, parents ...reflect.StructField) string {
 		tagSettings := schema.ParseTagSetting(sf.Tag.Get("gorm"), ";")
 		column := tagSettings["COLUMN"]
