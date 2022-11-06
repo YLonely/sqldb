@@ -40,7 +40,13 @@ import (
 )
 
 func main(){
-	// Open db and create the gorm instance `db`.
+	// Use gorm to open the database.
+	dsn := "user:pass@tcp(127.0.0.1:3306)/dbname?charset=utf8mb4&parseTime=True&loc=Local"
+  	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
+	if err != nil{
+		panic(err)
+	}
+
 	var Users sqldb.Model[User] = sqlgorm.NewModel[User](db)
 	ctx := context.Background()
 
