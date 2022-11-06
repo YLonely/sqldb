@@ -298,6 +298,40 @@ func TestList(t *testing.T) {
 			opts: sqldb.ListOptions{
 				FilterOptions: sqldb.FilterOptions{
 					OpOptions: []sqldb.OpQueryOption{
+						sqldb.NewLessOption(m.Columns().Weight, 101),
+					},
+				},
+				SortOptions: []sqldb.SortOption{
+					{
+						Column: m.Columns().Age,
+						Order:  sqldb.SortOrderAscending,
+					},
+				},
+			},
+			expectTotal: 3,
+			expect:      []User{*u4, *u3, *u2},
+		},
+		{
+			opts: sqldb.ListOptions{
+				FilterOptions: sqldb.FilterOptions{
+					OpOptions: []sqldb.OpQueryOption{
+						sqldb.NewLessOption(m.Columns().Weight, 101),
+					},
+				},
+				SortOptions: []sqldb.SortOption{
+					{
+						Column: m.Columns().Age,
+						Order:  sqldb.SortOrderDescending,
+					},
+				},
+			},
+			expectTotal: 3,
+			expect:      []User{*u2, *u3, *u4},
+		},
+		{
+			opts: sqldb.ListOptions{
+				FilterOptions: sqldb.FilterOptions{
+					OpOptions: []sqldb.OpQueryOption{
 						sqldb.NewNotEqualOption(m.Columns().Name, "William K Turner"),
 					},
 				},

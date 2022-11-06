@@ -93,11 +93,24 @@ type FilterOptions struct {
 	NotInOptions []RangeQueryOption
 }
 
+type SortOrder string
+
+const (
+	SortOrderAscending  SortOrder = "asc"
+	SortOrderDescending SortOrder = "desc"
+)
+
+type SortOption struct {
+	Column ColumnGetter
+	Order  SortOrder
+}
+
 // ListOptions contains options and parameters related to data listing.
 type ListOptions struct {
 	FilterOptions
-	Offset uint64
-	Limit  uint64
+	Offset      uint64
+	Limit       uint64
+	SortOptions []SortOption
 }
 
 // UpdateOption specifies an update operation which updates the `Column` with `Value`

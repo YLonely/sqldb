@@ -127,11 +127,16 @@ func (m Model[T]) List(ctx context.Context, opts sqldb.ListOptions) (entities []
 	}
 	total = uint64(t)
 	if opts.Limit != 0 {
-		db.Limit(int(opts.Limit))
+		db = db.Limit(int(opts.Limit))
 	}
 	if opts.Offset != 0 {
-		db.Offset(int(opts.Offset))
+		db = db.Offset(int(opts.Offset))
 	}
+
+	for _, opt := range opts.SortOptions {
+		db = db.Order(fmt.Sprintf("%s %s", opt.Column.GetColumnName(), opt.Order))
+	}
+
 	if err = db.Find(&entities).Error; err != nil {
 		return
 	}
