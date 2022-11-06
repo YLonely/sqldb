@@ -9,6 +9,7 @@ It also provides an implementation of the interfaces based on the [GORM](https:/
 A `Model` defined in `sqldb.go` contains a set of commonly used methods when handling data in a database.
 ```golang
 type Model[T any] interface {
+	Columns() T
 	Create(ctx context.Context, entity *T) error
 	Get(ctx context.Context, opts []OpQueryOption) (*T, error)
 	List(ctx context.Context, opts ListOptions) ([]*T, uint64, error)
@@ -28,7 +29,7 @@ type User struct {
 	DeletedAt sqldb.Column[gorm.DeletedAt]
 }
 ```
-Here `sqldb.Column` is a generic type which represents a table column in the database, it contains the value of the corresponding field and also the real column name of it. 
+Here `sqldb.Column` is a generic type which represents a table column in the database, it contains the value of the corresponding field and also the column name of it. 
 
 Now we can initialize a `Model` type for `User`:
 ```golang
@@ -61,12 +62,16 @@ func main(){
 	// To get the user
 	u, err := Users.Get(ctx, []sqldb.OpQueryOption{
 		// No more string literals, use .Columns() instead.
-		sqldb.NewEqualOption(Users.Columns().Name, "test"),
+		{
+			Column: Users.Columns().Name
+			Op: OpEq,
+			Value: "test",
+		}, // or use the constructor defined in sqldb.go: sqldb.NewEqualOption(Users.Columns().Name, "test")
 	})
 }
 ```
 
-It is worth noting that you do not write string literals of columns when constructing query options, every `Model[T]` type has a method `Columns()` which returns a instance of type T, all fields of type `sqldb.Column` are populated with column name during initialization.
+It is worth noting that you do not write string literals of columns when constructing query options, every `Model[T]` type has a method `Columns()` which returns a instance of type T, all fields of type `sqldb.Column` in type T are populated with column name during initialization.
 
 `sqldb.go` also defines a function type which abstracts transactions:
 ```golang
