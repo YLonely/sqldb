@@ -1,5 +1,8 @@
 # Introduction
 
+[![Go Report Card](https://goreportcard.com/badge/github.com/YLonely/sqldb)](https://goreportcard.com/report/github.com/YLonely/sqldb)
+[![Go Reference](https://pkg.go.dev/badge/github.com/YLonely/sqldb.svg)](https://pkg.go.dev/github.com/YLonely/sqldb)
+
 sqldb is a useful package which defines some common types and interfaces in manipulating data of models in sql database.
 
 It also provides an implementation of the interfaces based on the [GORM](https://gorm.io/) library.
