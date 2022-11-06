@@ -84,7 +84,7 @@ func (m Model[T]) dbInstance(ctx context.Context) *gorm.DB {
 	if tx := TransactionFrom(ctx); tx != nil {
 		return tx.WithContext(ctx)
 	}
-	return m.db
+	return m.db.WithContext(ctx)
 }
 
 func (m Model[T]) Update(ctx context.Context, query sqldb.FilterOptions, opts []sqldb.UpdateOption) (uint64, error) {
