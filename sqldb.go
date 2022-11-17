@@ -11,6 +11,7 @@ import (
 	"gorm.io/gorm/schema"
 
 	"github.com/YLonely/sqldb/internal/sql"
+	"github.com/samber/lo"
 )
 
 // A TransactionFunc starts a transaction.
@@ -27,70 +28,166 @@ const (
 	OpLte QueryOp = "<="
 )
 
+type OptionInterface interface {
+	TargetColumnName() string
+	GetValue() any
+}
+
+type Option[T any] struct {
+	Column Column[T]
+	Value  T
+}
+
+func NewOption[T any](col Column[T], v T) Option[T] {
+	return Option[T]{Column: col, Value: v}
+}
+
+func (opt Option[T]) TargetColumnName() string {
+	return opt.Column.name
+}
+
+func (opt Option[T]) GetValue() any {
+	if rt := reflect.TypeOf(opt.Value); rt.Kind() == reflect.Pointer {
+		return reflect.ValueOf(opt.Value).Elem().Interface()
+	}
+	return opt.Value
+}
+
+type ValuesOptionInterface interface {
+	TargetColumnName() string
+	GetValues() []any
+}
+
+type ValuesOption[T any] struct {
+	Column Column[T]
+	Values []T
+}
+
+func NewValuesOption[T any](col Column[T], vs []T) ValuesOption[T] {
+	return ValuesOption[T]{Column: col, Values: vs}
+}
+
+func (opt ValuesOption[T]) TargetColumnName() string {
+	return opt.Column.name
+}
+
+func (opt ValuesOption[T]) GetValues() []any {
+	convert := reflect.TypeOf(opt.Values[0]).Kind() == reflect.Pointer
+	return lo.Map(opt.Values, func(v T, _ int) any {
+		if convert {
+			return reflect.ValueOf(v).Elem().Interface()
+		}
+		return v
+	})
+}
+
+type OpQueryOptionInterface interface {
+	OptionInterface
+	QueryOp() QueryOp
+}
+
 // OpQueryOption specifies the query option with query operator.
-type OpQueryOption struct {
-	Column ColumnGetter
-	Op     QueryOp
-	Value  any
+type OpQueryOption[T any] struct {
+	Option[T]
+	Op QueryOp
 }
 
 // NewOpQueryOption creates an OpQueryOption
-func NewOpQueryOption(col ColumnGetter, op QueryOp, v any) OpQueryOption {
-	return OpQueryOption{
-		Column: col,
-		Op:     op,
-		Value:  v,
+func NewOpQueryOption[T any](col Column[T], op QueryOp, v T) OpQueryOption[T] {
+	return OpQueryOption[T]{
+		Option: Option[T]{
+			Column: col,
+			Value:  v,
+		},
+		Op: op,
 	}
 }
 
 // NewEqualOption creates an OpQueryOption with OpEq
-func NewEqualOption(col ColumnGetter, v any) OpQueryOption {
+func NewEqualOption[T any](col Column[T], v T) OpQueryOption[T] {
 	return NewOpQueryOption(col, OpEq, v)
 }
 
 // NewNotEqualOption creates an OpQueryOption with OpNe
-func NewNotEqualOption(col ColumnGetter, v any) OpQueryOption {
+func NewNotEqualOption[T any](col Column[T], v T) OpQueryOption[T] {
 	return NewOpQueryOption(col, OpNe, v)
 }
 
 // NewGreaterOption creates an OpQueryOption with OpGt
-func NewGreaterOption(col ColumnGetter, v any) OpQueryOption {
+func NewGreaterOption[T any](col Column[T], v T) OpQueryOption[T] {
 	return NewOpQueryOption(col, OpGt, v)
 }
 
 // NewLessOption creates an OpQueryOption with OpLt
-func NewLessOption(col ColumnGetter, v any) OpQueryOption {
+func NewLessOption[T any](col Column[T], v T) OpQueryOption[T] {
 	return NewOpQueryOption(col, OpLt, v)
 }
 
 // NewGreaterEqualOption creates an OpQueryOption with OpGte
-func NewGreaterEqualOption(col ColumnGetter, v any) OpQueryOption {
+func NewGreaterEqualOption[T any](col Column[T], v T) OpQueryOption[T] {
 	return NewOpQueryOption(col, OpGte, v)
 }
 
 // NewLessEqualOption creates an OpQueryOption with OpLte
-func NewLessEqualOption(col ColumnGetter, v any) OpQueryOption {
+func NewLessEqualOption[T any](col Column[T], v T) OpQueryOption[T] {
 	return NewOpQueryOption(col, OpLte, v)
 }
 
-// FuzzyQueryOption specifics the query option which does fuzzy query.
-type FuzzyQueryOption struct {
-	Column ColumnGetter
-	Values []any
+func (opt OpQueryOption[T]) QueryOp() QueryOp {
+	return opt.Op
+}
+
+type RangeQueryOptionInterface interface {
+	ValuesOptionInterface
 }
 
 // RangeQueryOption specifies the query option which does range query.
-type RangeQueryOption struct {
-	Column ColumnGetter
-	Values []any
+type RangeQueryOption[T any] struct {
+	ValuesOption[T]
+}
+
+func NewRangeQueryOption[T any](col Column[T], vs []T) RangeQueryOption[T] {
+	return RangeQueryOption[T]{
+		ValuesOption: NewValuesOption(col, vs),
+	}
+}
+
+type FuzzyQueryOptionInterface interface {
+	ValuesOptionInterface
+}
+
+// FuzzyQueryOption specifics the query option which does fuzzy query.
+type FuzzyQueryOption[T any] struct {
+	ValuesOption[T]
+}
+
+func NewFuzzyQueryOption[T any](col Column[T], vs []T) FuzzyQueryOption[T] {
+	return FuzzyQueryOption[T]{
+		ValuesOption: NewValuesOption(col, vs),
+	}
+}
+
+type UpdateOptionInterface interface {
+	OptionInterface
+}
+
+// UpdateOption specifies an update operation which updates the `Column` with `Value`
+type UpdateOption[T any] struct {
+	Option[T]
+}
+
+func NewUpdateOption[T any](col Column[T], v T) UpdateOption[T] {
+	return UpdateOption[T]{
+		Option: NewOption(col, v),
+	}
 }
 
 // FilterOptions contains options related to data filtering.
 type FilterOptions struct {
-	OpOptions    []OpQueryOption
-	FuzzyOptions []FuzzyQueryOption
-	InOptions    []RangeQueryOption
-	NotInOptions []RangeQueryOption
+	OpOptions    []OpQueryOptionInterface
+	FuzzyOptions []FuzzyQueryOptionInterface
+	InOptions    []RangeQueryOptionInterface
+	NotInOptions []RangeQueryOptionInterface
 }
 
 type SortOrder string
@@ -100,9 +197,29 @@ const (
 	SortOrderDescending SortOrder = "desc"
 )
 
-type SortOption struct {
-	Column ColumnGetter
+type SortOptionInterface interface {
+	TargetColumnName() string
+	SortOrder() SortOrder
+}
+
+type SortOption[T comparable] struct {
+	Column Column[T]
 	Order  SortOrder
+}
+
+func NewSortOption[T comparable](col Column[T], order SortOrder) SortOption[T] {
+	return SortOption[T]{
+		Column: col,
+		Order:  order,
+	}
+}
+
+func (opt SortOption[T]) TargetColumnName() string {
+	return opt.Column.name
+}
+
+func (opt SortOption[T]) SortOrder() SortOrder {
+	return opt.Order
 }
 
 // ListOptions contains options and parameters related to data listing.
@@ -110,13 +227,7 @@ type ListOptions struct {
 	FilterOptions
 	Offset      uint64
 	Limit       uint64
-	SortOptions []SortOption
-}
-
-// UpdateOption specifies an update operation which updates the `Column` with `Value`
-type UpdateOption struct {
-	Column ColumnGetter
-	Value  any
+	SortOptions []SortOptionInterface
 }
 
 // Model is an interface defines commonly used methods to manipulate data.
@@ -125,15 +236,10 @@ type Model[T any] interface {
 	// all fields of type sqldb.Column[U] in the instance are populated with corresponding column name.
 	Columns() T
 	Create(ctx context.Context, entity *T) error
-	Get(ctx context.Context, opts []OpQueryOption) (*T, error)
+	Get(ctx context.Context, opts []OpQueryOptionInterface) (*T, error)
 	List(ctx context.Context, opts ListOptions) ([]*T, uint64, error)
-	Update(ctx context.Context, query FilterOptions, opts []UpdateOption) (uint64, error)
+	Update(ctx context.Context, query FilterOptions, opts []UpdateOptionInterface) (uint64, error)
 	Delete(ctx context.Context, opts FilterOptions) error
-}
-
-// ColumnGetter returns the column name of the field in the database.
-type ColumnGetter interface {
-	GetColumnName() string
 }
 
 // columnSetter sets the column name of a filed

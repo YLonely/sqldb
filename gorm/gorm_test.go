@@ -110,7 +110,7 @@ func TestDelete(t *testing.T) {
 	}{
 		{
 			opts: sqldb.FilterOptions{
-				OpOptions: []sqldb.OpQueryOption{
+				OpOptions: []sqldb.OpQueryOptionInterface{
 					sqldb.NewEqualOption(m.Columns().Name, "William K Turner"),
 				},
 			},
@@ -118,63 +118,42 @@ func TestDelete(t *testing.T) {
 		},
 		{
 			opts: sqldb.FilterOptions{
-				FuzzyOptions: []sqldb.FuzzyQueryOption{
-					{
-						Column: m.Columns().Extra.Email,
-						Values: []any{".com", "yahoo"},
-					},
-					{
-						Column: m.Columns().Address,
-						Values: []any{"Street"},
-					},
+				FuzzyOptions: []sqldb.FuzzyQueryOptionInterface{
+					sqldb.NewFuzzyQueryOption(m.Columns().Extra.Email, []string{".com", "yahoo"}),
+					sqldb.NewFuzzyQueryOption(m.Columns().Address, []*string{lo.ToPtr("Street")}),
 				},
 			},
 			expect: []User{*u1, *u3},
 		},
 		{
 			opts: sqldb.FilterOptions{
-				InOptions: []sqldb.RangeQueryOption{
-					{
-						Column: m.Columns().Weight,
-						Values: []any{107, 100},
-					},
+				InOptions: []sqldb.RangeQueryOptionInterface{
+					sqldb.NewRangeQueryOption(m.Columns().Weight, []uint{107, 100}),
 				},
 			},
 			expect: []User{*u2, *u3},
 		},
 		{
 			opts: sqldb.FilterOptions{
-				NotInOptions: []sqldb.RangeQueryOption{
-					{
-						Column: m.Columns().Weight,
-						Values: []any{107, 100},
-					},
+				NotInOptions: []sqldb.RangeQueryOptionInterface{
+					sqldb.NewRangeQueryOption(m.Columns().Weight, []uint{107, 100}),
 				},
 			},
 			expect: []User{*u1, *u4},
 		},
 		{
 			opts: sqldb.FilterOptions{
-				OpOptions: []sqldb.OpQueryOption{
+				OpOptions: []sqldb.OpQueryOptionInterface{
 					sqldb.NewEqualOption(m.Columns().Extra.Email, "lurline1985@yahoo.com"),
 				},
-				FuzzyOptions: []sqldb.FuzzyQueryOption{
-					{
-						Column: m.Columns().Name,
-						Values: []any{"Turner"},
-					},
+				FuzzyOptions: []sqldb.FuzzyQueryOptionInterface{
+					sqldb.NewFuzzyQueryOption(m.Columns().Name, []string{"Turner"}),
 				},
-				InOptions: []sqldb.RangeQueryOption{
-					{
-						Column: m.Columns().Weight,
-						Values: []any{106, 108, 107},
-					},
+				InOptions: []sqldb.RangeQueryOptionInterface{
+					sqldb.NewRangeQueryOption(m.Columns().Weight, []uint{106, 108, 107}),
 				},
-				NotInOptions: []sqldb.RangeQueryOption{
-					{
-						Column: m.Columns().Age,
-						Values: []any{44, 90, 82},
-					},
+				NotInOptions: []sqldb.RangeQueryOptionInterface{
+					sqldb.NewRangeQueryOption(m.Columns().Age, []int{44, 90, 82}),
 				},
 			},
 			expect: []User{*u2, *u3, *u4},
@@ -191,13 +170,13 @@ func TestDelete(t *testing.T) {
 	}
 
 	err := m.Delete(ctx, sqldb.FilterOptions{
-		OpOptions: []sqldb.OpQueryOption{
+		OpOptions: []sqldb.OpQueryOptionInterface{
 			sqldb.NewEqualOption(m.Columns().ID, 4),
 		},
 	})
 	assert.Nil(t, err)
 
-	_, err = m.Get(ctx, []sqldb.OpQueryOption{
+	_, err = m.Get(ctx, []sqldb.OpQueryOptionInterface{
 		sqldb.NewEqualOption(m.Columns().ID, 4),
 	})
 	assert.ErrorIs(t, err, gorm.ErrRecordNotFound)
@@ -216,24 +195,18 @@ func TestUpdate(t *testing.T) {
 
 	for _, c := range []struct {
 		query  sqldb.FilterOptions
-		opts   []sqldb.UpdateOption
+		opts   []sqldb.UpdateOptionInterface
 		expect []User
 	}{
 		{
 			query: sqldb.FilterOptions{
-				OpOptions: []sqldb.OpQueryOption{
+				OpOptions: []sqldb.OpQueryOptionInterface{
 					sqldb.NewEqualOption(m.Columns().Name, "William K Turner"),
 				},
 			},
-			opts: []sqldb.UpdateOption{
-				{
-					Column: m.Columns().Name,
-					Value:  "",
-				},
-				{
-					Column: m.Columns().Age,
-					Value:  10,
-				},
+			opts: []sqldb.UpdateOptionInterface{
+				sqldb.NewUpdateOption(m.Columns().Name, ""),
+				sqldb.NewUpdateOption(m.Columns().Age, 10),
 			},
 			expect: []User{func() User {
 				u := *u1
@@ -244,22 +217,13 @@ func TestUpdate(t *testing.T) {
 		},
 		{
 			query: sqldb.FilterOptions{
-				FuzzyOptions: []sqldb.FuzzyQueryOption{
-					{
-						Column: m.Columns().Extra.Email,
-						Values: []any{".com", "yahoo"},
-					},
-					{
-						Column: m.Columns().Address,
-						Values: []any{"Street"},
-					},
+				FuzzyOptions: []sqldb.FuzzyQueryOptionInterface{
+					sqldb.NewFuzzyQueryOption(m.Columns().Extra.Email, []string{".com", "yahoo"}),
+					sqldb.NewFuzzyQueryOption(m.Columns().Address, []*string{lo.ToPtr("Street")}),
 				},
 			},
-			opts: []sqldb.UpdateOption{
-				{
-					Column: m.Columns().Weight,
-					Value:  1000,
-				},
+			opts: []sqldb.UpdateOptionInterface{
+				sqldb.NewUpdateOption(m.Columns().Weight, 1000),
 			},
 			expect: []User{*u1, func() User {
 				u := *u2
@@ -297,15 +261,12 @@ func TestList(t *testing.T) {
 		{
 			opts: sqldb.ListOptions{
 				FilterOptions: sqldb.FilterOptions{
-					OpOptions: []sqldb.OpQueryOption{
+					OpOptions: []sqldb.OpQueryOptionInterface{
 						sqldb.NewLessOption(m.Columns().Weight, 101),
 					},
 				},
-				SortOptions: []sqldb.SortOption{
-					{
-						Column: m.Columns().Age,
-						Order:  sqldb.SortOrderAscending,
-					},
+				SortOptions: []sqldb.SortOptionInterface{
+					sqldb.NewSortOption(m.Columns().Age, sqldb.SortOrderAscending),
 				},
 			},
 			expectTotal: 3,
@@ -314,15 +275,12 @@ func TestList(t *testing.T) {
 		{
 			opts: sqldb.ListOptions{
 				FilterOptions: sqldb.FilterOptions{
-					OpOptions: []sqldb.OpQueryOption{
+					OpOptions: []sqldb.OpQueryOptionInterface{
 						sqldb.NewLessOption(m.Columns().Weight, 101),
 					},
 				},
-				SortOptions: []sqldb.SortOption{
-					{
-						Column: m.Columns().Age,
-						Order:  sqldb.SortOrderDescending,
-					},
+				SortOptions: []sqldb.SortOptionInterface{
+					sqldb.NewSortOption(m.Columns().Age, sqldb.SortOrderDescending),
 				},
 			},
 			expectTotal: 3,
@@ -331,7 +289,7 @@ func TestList(t *testing.T) {
 		{
 			opts: sqldb.ListOptions{
 				FilterOptions: sqldb.FilterOptions{
-					OpOptions: []sqldb.OpQueryOption{
+					OpOptions: []sqldb.OpQueryOptionInterface{
 						sqldb.NewNotEqualOption(m.Columns().Name, "William K Turner"),
 					},
 				},
@@ -344,15 +302,9 @@ func TestList(t *testing.T) {
 		{
 			opts: sqldb.ListOptions{
 				FilterOptions: sqldb.FilterOptions{
-					FuzzyOptions: []sqldb.FuzzyQueryOption{
-						{
-							Column: m.Columns().Extra.Email,
-							Values: []any{".com", "yahoo"},
-						},
-						{
-							Column: m.Columns().Address,
-							Values: []any{"Street"},
-						},
+					FuzzyOptions: []sqldb.FuzzyQueryOptionInterface{
+						sqldb.NewFuzzyQueryOption(m.Columns().Extra.Email, []string{".com", "yahoo"}),
+						sqldb.NewFuzzyQueryOption(m.Columns().Address, []*string{lo.ToPtr("Street")}),
 					},
 				},
 			},
@@ -362,11 +314,8 @@ func TestList(t *testing.T) {
 		{
 			opts: sqldb.ListOptions{
 				FilterOptions: sqldb.FilterOptions{
-					InOptions: []sqldb.RangeQueryOption{
-						{
-							Column: m.Columns().Weight,
-							Values: []any{107, 100},
-						},
+					InOptions: []sqldb.RangeQueryOptionInterface{
+						sqldb.NewRangeQueryOption(m.Columns().Weight, []uint{107, 100}),
 					},
 				},
 				Offset: 1,
@@ -377,27 +326,18 @@ func TestList(t *testing.T) {
 		{
 			opts: sqldb.ListOptions{
 				FilterOptions: sqldb.FilterOptions{
-					OpOptions: []sqldb.OpQueryOption{
+					OpOptions: []sqldb.OpQueryOptionInterface{
 						sqldb.NewGreaterEqualOption(m.Columns().Age, 46),
 						sqldb.NewLessOption(m.Columns().Age, 49),
 					},
-					FuzzyOptions: []sqldb.FuzzyQueryOption{
-						{
-							Column: m.Columns().Name,
-							Values: []any{"Turner"},
-						},
+					FuzzyOptions: []sqldb.FuzzyQueryOptionInterface{
+						sqldb.NewFuzzyQueryOption(m.Columns().Name, []string{"Turner"}),
 					},
-					InOptions: []sqldb.RangeQueryOption{
-						{
-							Column: m.Columns().Weight,
-							Values: []any{106, 108, 107},
-						},
+					InOptions: []sqldb.RangeQueryOptionInterface{
+						sqldb.NewRangeQueryOption(m.Columns().Weight, []uint{106, 108, 107}),
 					},
-					NotInOptions: []sqldb.RangeQueryOption{
-						{
-							Column: m.Columns().Age,
-							Values: []any{100},
-						},
+					NotInOptions: []sqldb.RangeQueryOptionInterface{
+						sqldb.NewRangeQueryOption(m.Columns().Age, []int{100}),
 					},
 				},
 			},
@@ -421,13 +361,13 @@ func TestGet(t *testing.T) {
 
 	m := NewModel[User](db)
 
-	user, err := m.Get(ctx, []sqldb.OpQueryOption{
+	user, err := m.Get(ctx, []sqldb.OpQueryOptionInterface{
 		sqldb.NewEqualOption(m.Columns().ID, 4),
 		sqldb.NewEqualOption(m.Columns().Extra.Email, "jake.andrews@163.com"),
 	})
 	assert.Nil(t, err)
 	assert.Equal(t, u4, user)
-	_, err = m.Get(ctx, []sqldb.OpQueryOption{
+	_, err = m.Get(ctx, []sqldb.OpQueryOptionInterface{
 		sqldb.NewEqualOption(m.Columns().ID, 100),
 	})
 	assert.ErrorIs(t, err, gorm.ErrRecordNotFound, "")
@@ -442,22 +382,19 @@ func TestTransaction(t *testing.T) {
 
 	err := Transaction(ctx, func(ctx context.Context) error {
 		assert.Nil(t, m.Delete(ctx, sqldb.FilterOptions{
-			OpOptions: []sqldb.OpQueryOption{
+			OpOptions: []sqldb.OpQueryOptionInterface{
 				sqldb.NewEqualOption(m.Columns().ID, 1),
 			},
 		}))
 		assert.Nil(t, m.Delete(ctx, sqldb.FilterOptions{
-			OpOptions: []sqldb.OpQueryOption{
+			OpOptions: []sqldb.OpQueryOptionInterface{
 				sqldb.NewEqualOption(m.Columns().ID, 2),
 			},
 		}))
 		_ = Transaction(ctx, func(ctx context.Context) error {
 			assert.Nil(t, m.Delete(ctx, sqldb.FilterOptions{
-				InOptions: []sqldb.RangeQueryOption{
-					{
-						Column: m.Columns().ID,
-						Values: []any{3, 4},
-					},
+				InOptions: []sqldb.RangeQueryOptionInterface{
+					sqldb.NewRangeQueryOption(m.Columns().ID, []uint64{3, 4}),
 				},
 			}))
 			return errors.New("")
@@ -472,16 +409,13 @@ func TestTransaction(t *testing.T) {
 
 	err = Transaction(ctx, func(ctx context.Context) error {
 		assert.Nil(t, m.Delete(ctx, sqldb.FilterOptions{
-			InOptions: []sqldb.RangeQueryOption{
-				{
-					Column: m.Columns().ID,
-					Values: []any{1, 2},
-				},
+			InOptions: []sqldb.RangeQueryOptionInterface{
+				sqldb.NewRangeQueryOption(m.Columns().ID, []uint64{1, 2}),
 			},
 		}))
 		_ = Transaction(ctx, func(ctx context.Context) error {
 			m.Delete(ctx, sqldb.FilterOptions{
-				OpOptions: []sqldb.OpQueryOption{
+				OpOptions: []sqldb.OpQueryOptionInterface{
 					sqldb.NewEqualOption(m.Columns().Weight, 100),
 				},
 			})

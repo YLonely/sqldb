@@ -87,13 +87,13 @@ func (m Model[T]) dbInstance(ctx context.Context) *gorm.DB {
 	return m.db.WithContext(ctx)
 }
 
-func (m Model[T]) Update(ctx context.Context, query sqldb.FilterOptions, opts []sqldb.UpdateOption) (uint64, error) {
+func (m Model[T]) Update(ctx context.Context, query sqldb.FilterOptions, opts []sqldb.UpdateOptionInterface) (uint64, error) {
 	if len(opts) == 0 {
 		return 0, errors.New("empty options")
 	}
 	updateMap := map[string]any{}
 	for _, opt := range opts {
-		updateMap[opt.Column.GetColumnName()] = opt.Value
+		updateMap[opt.TargetColumnName()] = opt.GetValue()
 	}
 	res := applyFilterOptions(m.dbInstance(ctx), query).Model(new(T)).Updates(updateMap)
 	if res.Error != nil {
@@ -106,7 +106,7 @@ func (m Model[T]) Delete(ctx context.Context, opts sqldb.FilterOptions) error {
 	return applyFilterOptions(m.dbInstance(ctx), opts).Delete(new(T)).Error
 }
 
-func (m Model[T]) Get(ctx context.Context, opts []sqldb.OpQueryOption) (entity *T, err error) {
+func (m Model[T]) Get(ctx context.Context, opts []sqldb.OpQueryOptionInterface) (entity *T, err error) {
 	if len(opts) == 0 {
 		return nil, errors.New("empty options")
 	}
@@ -134,7 +134,7 @@ func (m Model[T]) List(ctx context.Context, opts sqldb.ListOptions) (entities []
 	}
 
 	for _, opt := range opts.SortOptions {
-		db = db.Order(fmt.Sprintf("%s %s", opt.Column.GetColumnName(), opt.Order))
+		db = db.Order(fmt.Sprintf("%s %s", opt.TargetColumnName(), opt.SortOrder()))
 	}
 
 	if err = db.Find(&entities).Error; err != nil {
@@ -161,38 +161,38 @@ func applyFilterOptions(db *gorm.DB, opts sqldb.FilterOptions) *gorm.DB {
 	)
 }
 
-func applyIsQueryOptions(db *gorm.DB, opts []sqldb.OpQueryOption) *gorm.DB {
+func applyIsQueryOptions(db *gorm.DB, opts []sqldb.OpQueryOptionInterface) *gorm.DB {
 	if len(opts) == 0 {
 		return db
 	}
-	query := strings.Join(lo.Map(opts, func(opt sqldb.OpQueryOption, _ int) string {
-		if opt.Op == "" {
+	query := strings.Join(lo.Map(opts, func(opt sqldb.OpQueryOptionInterface, _ int) string {
+		if opt.QueryOp() == "" {
 			panic("Op must be provided in IsQueryOption")
 		}
-		return fmt.Sprintf("%s %s ?", opt.Column.GetColumnName(), opt.Op)
+		return fmt.Sprintf("%s %s ?", opt.TargetColumnName(), opt.QueryOp())
 	}), " AND ")
-	return db.Where(query, lo.Map(opts, func(opt sqldb.OpQueryOption, _ int) any { return opt.Value })...)
+	return db.Where(query, lo.Map(opts, func(opt sqldb.OpQueryOptionInterface, _ int) any { return opt.GetValue() })...)
 }
 
-func applyRangeQueryOptions(db *gorm.DB, op string, opts []sqldb.RangeQueryOption) *gorm.DB {
+func applyRangeQueryOptions(db *gorm.DB, op string, opts []sqldb.RangeQueryOptionInterface) *gorm.DB {
 	if len(opts) == 0 {
 		return db
 	}
-	query := strings.Join(lo.Map(opts, func(opt sqldb.RangeQueryOption, _ int) string {
-		return fmt.Sprintf("%s %s (?)", opt.Column.GetColumnName(), op)
+	query := strings.Join(lo.Map(opts, func(opt sqldb.RangeQueryOptionInterface, _ int) string {
+		return fmt.Sprintf("%s %s (?)", opt.TargetColumnName(), op)
 	}), " AND ")
-	return db.Where(query, lo.Map(opts, func(opt sqldb.RangeQueryOption, _ int) any { return opt.Values })...)
+	return db.Where(query, lo.Map(opts, func(opt sqldb.RangeQueryOptionInterface, _ int) any { return opt.GetValues() })...)
 }
 
-func applyFuzzyQueryOptions(db *gorm.DB, opts []sqldb.FuzzyQueryOption) *gorm.DB {
+func applyFuzzyQueryOptions(db *gorm.DB, opts []sqldb.FuzzyQueryOptionInterface) *gorm.DB {
 	if len(opts) == 0 {
 		return db
 	}
-	lo.ForEach(opts, func(opt sqldb.FuzzyQueryOption, _ int) {
-		queries := lo.Map(opt.Values, func(_ any, _ int) string {
-			return fmt.Sprintf("%s LIKE ?", opt.Column.GetColumnName())
+	lo.ForEach(opts, func(opt sqldb.FuzzyQueryOptionInterface, _ int) {
+		queries := lo.Map(opt.GetValues(), func(_ any, _ int) string {
+			return fmt.Sprintf("%s LIKE ?", opt.TargetColumnName())
 		})
-		values := lo.Map(opt.Values, func(v any, _ int) any { return fmt.Sprintf("%%%v%%", v) })
+		values := lo.Map(opt.GetValues(), func(v any, _ int) any { return fmt.Sprintf("%%%v%%", v) })
 		db = db.Where(strings.Join(queries, " OR "), values...)
 	})
 	return db
