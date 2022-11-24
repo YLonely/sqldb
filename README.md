@@ -14,9 +14,9 @@ A `Model` defined in `sqldb.go` contains a set of commonly used methods when han
 type Model[T any] interface {
 	Columns() T
 	Create(ctx context.Context, entity *T) error
-	Get(ctx context.Context, opts []OpQueryOption) (*T, error)
+	Get(ctx context.Context, opts []OpQueryOptionInterface) (*T, error)
 	List(ctx context.Context, opts ListOptions) ([]*T, uint64, error)
-	Update(ctx context.Context, query FilterOptions, opts []UpdateOption) (uint64, error)
+	Update(ctx context.Context, query FilterOptions, opts []UpdateOptionInterface) (uint64, error)
 	Delete(ctx context.Context, opts FilterOptions) error
 }
 ```
@@ -27,12 +27,12 @@ import "github.com/YLonely/sqldb"
 type User struct {
 	ID      sqldb.Column[uint64] `gorm:"column:id;primaryKey"`
 	Name    sqldb.Column[string] `gorm:"column:user_name"`
-	Age     sqldb.Column[*int]
+	Age     sqldb.PtrColumn[int]
 	CreatedAt sqldb.Column[time.Time]
 	DeletedAt sqldb.Column[gorm.DeletedAt]
 }
 ```
-Here `sqldb.Column` is a generic type which represents a table column in the database, it contains the value of the corresponding field and also the column name of it. 
+Here `sqldb.Column` or `sqldb.PtrColumn` is a generic type which represents a table column in the database, it contains the value of the corresponding field and also the column name of it. 
 
 Now we can initialize a `Model` type for `User`:
 ```golang
@@ -58,18 +58,14 @@ func main(){
 	age := 10
 	u := &User{
 		Name: sqldb.NewColumn("test"),
-		Age: sqldb.NewColumn(&age),
+		Age: sqldb.NewPtrColumn(age),
 	}
 	_ = Users.Create(ctx, u)
 
 	// To get the user
-	u, err := Users.Get(ctx, []sqldb.OpQueryOption{
+	u, err := Users.Get(ctx, []sqldb.OpQueryOptionInterface{
 		// No more string literals, use .Columns() instead.
-		{
-			Column: Users.Columns().Name
-			Op: OpEq,
-			Value: "test",
-		}, // or use the constructor defined in sqldb.go: sqldb.NewEqualOption(Users.Columns().Name, "test")
+		sqldb.NewEqualOption(Users.Columns().Name, "test"),
 	})
 }
 ```
@@ -87,9 +83,8 @@ Transaction := gorm.NewTransactionFunc(db)
 
 Transaction(context.Background(), func(ctx context.Context) error {
 	if err := Users.Delete(ctx, sqldb.FilterOptions{
-		InOptions: []sqldb.RangeQueryOption{
-			Column: Users.Age,
-			Values: []any{10, 11, 12}
+		InOptions: []sqldb.RangeQueryOptionInterface{
+			sqldb.NewRangeQueryOption(Users.Age, []int{10, 11, 12}),
 		}
 	}); err != nil {
 		return err

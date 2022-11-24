@@ -19,7 +19,7 @@ type User struct {
 	ID      sqldb.Column[uint64] `gorm:"column:id;primaryKey"`
 	Name    sqldb.Column[string] `gorm:"column:user_name"`
 	Age     sqldb.Column[int]
-	Address sqldb.Column[*string]
+	Address sqldb.PtrColumn[string]
 	Status  sqldb.Column[Status] `gorm:"serializer:json"`
 	Embedded
 	Extra     Extra `gorm:"embedded;embeddedPrefix:extra_"`
@@ -58,7 +58,7 @@ func NewUser(id uint64, name string, age int, addr string, weight uint, occupati
 		ID:       sqldb.NewColumn(id),
 		Name:     sqldb.NewColumn(name),
 		Age:      sqldb.NewColumn(age),
-		Address:  sqldb.NewColumn(&addr),
+		Address:  sqldb.NewPtrColumn(addr),
 		Status:   sqldb.NewColumn(Status{Occupation: occupation}),
 		Embedded: Embedded{Weight: sqldb.NewColumn(weight)},
 		Extra:    Extra{Email: sqldb.NewColumn(email)},
@@ -120,7 +120,7 @@ func TestDelete(t *testing.T) {
 			opts: sqldb.FilterOptions{
 				FuzzyOptions: []sqldb.FuzzyQueryOptionInterface{
 					sqldb.NewFuzzyQueryOption(m.Columns().Extra.Email, []string{".com", "yahoo"}),
-					sqldb.NewFuzzyQueryOption(m.Columns().Address, []*string{lo.ToPtr("Street")}),
+					sqldb.NewFuzzyQueryOption(m.Columns().Address, []string{"Street"}),
 				},
 			},
 			expect: []User{*u1, *u3},
@@ -171,13 +171,13 @@ func TestDelete(t *testing.T) {
 
 	err := m.Delete(ctx, sqldb.FilterOptions{
 		OpOptions: []sqldb.OpQueryOptionInterface{
-			sqldb.NewEqualOption(m.Columns().ID, 4),
+			sqldb.NewEqualOption(m.Columns().ID, uint64(4)),
 		},
 	})
 	assert.Nil(t, err)
 
 	_, err = m.Get(ctx, []sqldb.OpQueryOptionInterface{
-		sqldb.NewEqualOption(m.Columns().ID, 4),
+		sqldb.NewEqualOption(m.Columns().ID, uint64(4)),
 	})
 	assert.ErrorIs(t, err, gorm.ErrRecordNotFound)
 
@@ -219,11 +219,11 @@ func TestUpdate(t *testing.T) {
 			query: sqldb.FilterOptions{
 				FuzzyOptions: []sqldb.FuzzyQueryOptionInterface{
 					sqldb.NewFuzzyQueryOption(m.Columns().Extra.Email, []string{".com", "yahoo"}),
-					sqldb.NewFuzzyQueryOption(m.Columns().Address, []*string{lo.ToPtr("Street")}),
+					sqldb.NewFuzzyQueryOption(m.Columns().Address, []string{"Street"}),
 				},
 			},
 			opts: []sqldb.UpdateOptionInterface{
-				sqldb.NewUpdateOption(m.Columns().Weight, 1000),
+				sqldb.NewUpdateOption(m.Columns().Weight, uint(1000)),
 			},
 			expect: []User{*u1, func() User {
 				u := *u2
@@ -262,11 +262,11 @@ func TestList(t *testing.T) {
 			opts: sqldb.ListOptions{
 				FilterOptions: sqldb.FilterOptions{
 					OpOptions: []sqldb.OpQueryOptionInterface{
-						sqldb.NewLessOption(m.Columns().Weight, 101),
+						sqldb.NewLessOption(m.Columns().Weight, uint(101)),
 					},
 				},
 				SortOptions: []sqldb.SortOptionInterface{
-					sqldb.NewSortOption(m.Columns().Age, sqldb.SortOrderAscending),
+					sqldb.NewSortOption[int](m.Columns().Age, sqldb.SortOrderAscending),
 				},
 			},
 			expectTotal: 3,
@@ -276,11 +276,11 @@ func TestList(t *testing.T) {
 			opts: sqldb.ListOptions{
 				FilterOptions: sqldb.FilterOptions{
 					OpOptions: []sqldb.OpQueryOptionInterface{
-						sqldb.NewLessOption(m.Columns().Weight, 101),
+						sqldb.NewLessOption(m.Columns().Weight, uint(101)),
 					},
 				},
 				SortOptions: []sqldb.SortOptionInterface{
-					sqldb.NewSortOption(m.Columns().Age, sqldb.SortOrderDescending),
+					sqldb.NewSortOption[int](m.Columns().Age, sqldb.SortOrderDescending),
 				},
 			},
 			expectTotal: 3,
@@ -304,7 +304,7 @@ func TestList(t *testing.T) {
 				FilterOptions: sqldb.FilterOptions{
 					FuzzyOptions: []sqldb.FuzzyQueryOptionInterface{
 						sqldb.NewFuzzyQueryOption(m.Columns().Extra.Email, []string{".com", "yahoo"}),
-						sqldb.NewFuzzyQueryOption(m.Columns().Address, []*string{lo.ToPtr("Street")}),
+						sqldb.NewFuzzyQueryOption(m.Columns().Address, []string{"Street"}),
 					},
 				},
 			},
@@ -362,13 +362,13 @@ func TestGet(t *testing.T) {
 	m := NewModel[User](db)
 
 	user, err := m.Get(ctx, []sqldb.OpQueryOptionInterface{
-		sqldb.NewEqualOption(m.Columns().ID, 4),
+		sqldb.NewEqualOption(m.Columns().ID, uint64(4)),
 		sqldb.NewEqualOption(m.Columns().Extra.Email, "jake.andrews@163.com"),
 	})
 	assert.Nil(t, err)
 	assert.Equal(t, u4, user)
 	_, err = m.Get(ctx, []sqldb.OpQueryOptionInterface{
-		sqldb.NewEqualOption(m.Columns().ID, 100),
+		sqldb.NewEqualOption(m.Columns().ID, uint64(100)),
 	})
 	assert.ErrorIs(t, err, gorm.ErrRecordNotFound, "")
 }
@@ -383,12 +383,12 @@ func TestTransaction(t *testing.T) {
 	err := Transaction(ctx, func(ctx context.Context) error {
 		assert.Nil(t, m.Delete(ctx, sqldb.FilterOptions{
 			OpOptions: []sqldb.OpQueryOptionInterface{
-				sqldb.NewEqualOption(m.Columns().ID, 1),
+				sqldb.NewEqualOption(m.Columns().ID, uint64(1)),
 			},
 		}))
 		assert.Nil(t, m.Delete(ctx, sqldb.FilterOptions{
 			OpOptions: []sqldb.OpQueryOptionInterface{
-				sqldb.NewEqualOption(m.Columns().ID, 2),
+				sqldb.NewEqualOption(m.Columns().ID, uint64(2)),
 			},
 		}))
 		_ = Transaction(ctx, func(ctx context.Context) error {
@@ -416,7 +416,7 @@ func TestTransaction(t *testing.T) {
 		_ = Transaction(ctx, func(ctx context.Context) error {
 			m.Delete(ctx, sqldb.FilterOptions{
 				OpOptions: []sqldb.OpQueryOptionInterface{
-					sqldb.NewEqualOption(m.Columns().Weight, 100),
+					sqldb.NewEqualOption(m.Columns().Weight, uint(100)),
 				},
 			})
 			return errors.New("")

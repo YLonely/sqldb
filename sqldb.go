@@ -7,11 +7,11 @@ import (
 	"errors"
 	"reflect"
 
+	"github.com/samber/lo"
 	"gorm.io/gorm/clause"
 	"gorm.io/gorm/schema"
 
 	"github.com/YLonely/sqldb/internal/sql"
-	"github.com/samber/lo"
 )
 
 // A TransactionFunc starts a transaction.
@@ -28,74 +28,76 @@ const (
 	OpLte QueryOp = "<="
 )
 
+// OptionInterface wraps basic methods of options.
 type OptionInterface interface {
+	// TargetColumnName returns the name of the column an operation processes against.
 	TargetColumnName() string
+	// GetValue returns the value the option carries. It is used by the operation to query or update the target column.
 	GetValue() any
 }
 
-type Option[T any] struct {
-	Column Column[T]
+// Option implements the OptionInterface.
+type Option[T any, C Column[T] | PtrColumn[T]] struct {
+	Column C
 	Value  T
 }
 
-func NewOption[T any](col Column[T], v T) Option[T] {
-	return Option[T]{Column: col, Value: v}
+// NewOption returns an new Option.
+func NewOption[T any, C Column[T] | PtrColumn[T]](col C, v T) Option[T, C] {
+	return Option[T, C]{Column: col, Value: v}
 }
 
-func (opt Option[T]) TargetColumnName() string {
-	return opt.Column.name
+func (opt Option[T, C]) TargetColumnName() string {
+	return (any)(opt.Column).(ColumnGetter).GetColumnName()
 }
 
-func (opt Option[T]) GetValue() any {
-	if rt := reflect.TypeOf(opt.Value); rt.Kind() == reflect.Pointer {
-		return reflect.ValueOf(opt.Value).Elem().Interface()
-	}
+func (opt Option[T, C]) GetValue() any {
 	return opt.Value
 }
 
+// ValuesOptionInterface wraps basic method of options which carry multiple values.
 type ValuesOptionInterface interface {
+	// TargetColumnName returns the name of the column an operation processes against.
 	TargetColumnName() string
+	// GetValues returns the values the option carries. Those values are used to query data.
 	GetValues() []any
 }
 
-type ValuesOption[T any] struct {
-	Column Column[T]
+// ValuesOption implements the ValuesOptionInterface.
+type ValuesOption[T any, C Column[T] | PtrColumn[T]] struct {
+	Column C
 	Values []T
 }
 
-func NewValuesOption[T any](col Column[T], vs []T) ValuesOption[T] {
-	return ValuesOption[T]{Column: col, Values: vs}
+// NewValuesOption returns a new ValuesOption.
+func NewValuesOption[T any, C Column[T] | PtrColumn[T]](col C, vs []T) ValuesOption[T, C] {
+	return ValuesOption[T, C]{Column: col, Values: vs}
 }
 
-func (opt ValuesOption[T]) TargetColumnName() string {
-	return opt.Column.name
+func (opt ValuesOption[T, C]) TargetColumnName() string {
+	return (any)(opt.Column).(ColumnGetter).GetColumnName()
 }
 
-func (opt ValuesOption[T]) GetValues() []any {
-	convert := reflect.TypeOf(opt.Values[0]).Kind() == reflect.Pointer
-	return lo.Map(opt.Values, func(v T, _ int) any {
-		if convert {
-			return reflect.ValueOf(v).Elem().Interface()
-		}
-		return v
-	})
+func (opt ValuesOption[T, C]) GetValues() []any {
+	return lo.ToAnySlice(opt.Values)
 }
 
+// OpQueryOptionInterface represents a query which use the given query operator to search data.
 type OpQueryOptionInterface interface {
 	OptionInterface
 	QueryOp() QueryOp
 }
 
-// OpQueryOption specifies the query option with query operator.
-type OpQueryOption[T any] struct {
-	Option[T]
+// OpQueryOption implements the OpQueryOptionInterface.
+type OpQueryOption[T any, C Column[T] | PtrColumn[T]] struct {
+	Option[T, C]
 	Op QueryOp
 }
 
-// NewOpQueryOption creates an OpQueryOption
-func NewOpQueryOption[T any](col Column[T], op QueryOp, v T) OpQueryOption[T] {
-	return OpQueryOption[T]{
-		Option: Option[T]{
+// NewOpQueryOption creates an OpQueryOption.
+func NewOpQueryOption[T any, C Column[T] | PtrColumn[T]](col C, op QueryOp, v T) OpQueryOption[T, C] {
+	return OpQueryOption[T, C]{
+		Option: Option[T, C]{
 			Column: col,
 			Value:  v,
 		},
@@ -103,86 +105,92 @@ func NewOpQueryOption[T any](col Column[T], op QueryOp, v T) OpQueryOption[T] {
 	}
 }
 
-// NewEqualOption creates an OpQueryOption with OpEq
-func NewEqualOption[T any](col Column[T], v T) OpQueryOption[T] {
+// NewEqualOption creates an OpQueryOption with operator OpEq.
+func NewEqualOption[T any, C Column[T] | PtrColumn[T]](col C, v T) OpQueryOption[T, C] {
 	return NewOpQueryOption(col, OpEq, v)
 }
 
-// NewNotEqualOption creates an OpQueryOption with OpNe
-func NewNotEqualOption[T any](col Column[T], v T) OpQueryOption[T] {
+// NewNotEqualOption creates an OpQueryOption with operator OpNe.
+func NewNotEqualOption[T any, C Column[T] | PtrColumn[T]](col C, v T) OpQueryOption[T, C] {
 	return NewOpQueryOption(col, OpNe, v)
 }
 
-// NewGreaterOption creates an OpQueryOption with OpGt
-func NewGreaterOption[T any](col Column[T], v T) OpQueryOption[T] {
+// NewGreaterOption creates an OpQueryOption with operator OpGt.
+func NewGreaterOption[T any, C Column[T] | PtrColumn[T]](col C, v T) OpQueryOption[T, C] {
 	return NewOpQueryOption(col, OpGt, v)
 }
 
-// NewLessOption creates an OpQueryOption with OpLt
-func NewLessOption[T any](col Column[T], v T) OpQueryOption[T] {
+// NewLessOption creates an OpQueryOption with operator OpLt.
+func NewLessOption[T any, C Column[T] | PtrColumn[T]](col C, v T) OpQueryOption[T, C] {
 	return NewOpQueryOption(col, OpLt, v)
 }
 
-// NewGreaterEqualOption creates an OpQueryOption with OpGte
-func NewGreaterEqualOption[T any](col Column[T], v T) OpQueryOption[T] {
+// NewGreaterEqualOption creates an OpQueryOption with operator OpGte.
+func NewGreaterEqualOption[T any, C Column[T] | PtrColumn[T]](col C, v T) OpQueryOption[T, C] {
 	return NewOpQueryOption(col, OpGte, v)
 }
 
-// NewLessEqualOption creates an OpQueryOption with OpLte
-func NewLessEqualOption[T any](col Column[T], v T) OpQueryOption[T] {
+// NewLessEqualOption creates an OpQueryOption with operator OpLte.
+func NewLessEqualOption[T any, C Column[T] | PtrColumn[T]](col C, v T) OpQueryOption[T, C] {
 	return NewOpQueryOption(col, OpLte, v)
 }
 
-func (opt OpQueryOption[T]) QueryOp() QueryOp {
+func (opt OpQueryOption[T, C]) QueryOp() QueryOp {
 	return opt.Op
 }
 
+// RangeQueryOptionInterface represents a query that find data from a given range of values.
 type RangeQueryOptionInterface interface {
 	ValuesOptionInterface
 }
 
-// RangeQueryOption specifies the query option which does range query.
-type RangeQueryOption[T any] struct {
-	ValuesOption[T]
+// RangeQueryOption implements the RangeQueryOptionInterface.
+type RangeQueryOption[T any, C Column[T] | PtrColumn[T]] struct {
+	ValuesOption[T, C]
 }
 
-func NewRangeQueryOption[T any](col Column[T], vs []T) RangeQueryOption[T] {
-	return RangeQueryOption[T]{
+// NewRangeQueryOption creates a new RangeQueryOption.
+func NewRangeQueryOption[T any, C Column[T] | PtrColumn[T]](col C, vs []T) RangeQueryOption[T, C] {
+	return RangeQueryOption[T, C]{
 		ValuesOption: NewValuesOption(col, vs),
 	}
 }
 
+// FuzzyQueryOptionInterface represents a query that find data that match given patterns approximately.
 type FuzzyQueryOptionInterface interface {
 	ValuesOptionInterface
 }
 
-// FuzzyQueryOption specifics the query option which does fuzzy query.
-type FuzzyQueryOption[T any] struct {
-	ValuesOption[T]
+// FuzzyQueryOption implements the FuzzyQueryOptionInterface.
+type FuzzyQueryOption[T any, C Column[T] | PtrColumn[T]] struct {
+	ValuesOption[T, C]
 }
 
-func NewFuzzyQueryOption[T any](col Column[T], vs []T) FuzzyQueryOption[T] {
-	return FuzzyQueryOption[T]{
+// NewFuzzyQueryOption creates a new FuzzyQueryOption.
+func NewFuzzyQueryOption[T any, C Column[T] | PtrColumn[T]](col C, vs []T) FuzzyQueryOption[T, C] {
+	return FuzzyQueryOption[T, C]{
 		ValuesOption: NewValuesOption(col, vs),
 	}
 }
 
+// UpdateOptionInterface represents an update operation that updates the target column with given value.
 type UpdateOptionInterface interface {
 	OptionInterface
 }
 
-// UpdateOption specifies an update operation which updates the `Column` with `Value`
-type UpdateOption[T any] struct {
-	Option[T]
+// UpdateOption implements the UpdateOptionInterface.
+type UpdateOption[T any, C Column[T] | PtrColumn[T]] struct {
+	Option[T, C]
 }
 
-func NewUpdateOption[T any](col Column[T], v T) UpdateOption[T] {
-	return UpdateOption[T]{
+// NewUpdateOption creates a new UpdateOption.
+func NewUpdateOption[T any, C Column[T] | PtrColumn[T]](col C, v T) UpdateOption[T, C] {
+	return UpdateOption[T, C]{
 		Option: NewOption(col, v),
 	}
 }
 
-// FilterOptions contains options related to data filtering.
+// FilterOptions contains options that related to data filtering.
 type FilterOptions struct {
 	OpOptions    []OpQueryOptionInterface
 	FuzzyOptions []FuzzyQueryOptionInterface
@@ -197,32 +205,35 @@ const (
 	SortOrderDescending SortOrder = "desc"
 )
 
+// SortOptionInterface represents an sort operation.
 type SortOptionInterface interface {
 	TargetColumnName() string
 	SortOrder() SortOrder
 }
 
-type SortOption[T comparable] struct {
-	Column Column[T]
+// SortOption implements the SortOptionInterface.
+type SortOption[T comparable, C Column[T] | PtrColumn[T]] struct {
+	Column C
 	Order  SortOrder
 }
 
-func NewSortOption[T comparable](col Column[T], order SortOrder) SortOption[T] {
-	return SortOption[T]{
+// NewSortOption creates a new SortOption.
+func NewSortOption[T comparable, C Column[T] | PtrColumn[T]](col C, order SortOrder) SortOption[T, C] {
+	return SortOption[T, C]{
 		Column: col,
 		Order:  order,
 	}
 }
 
-func (opt SortOption[T]) TargetColumnName() string {
-	return opt.Column.name
+func (opt SortOption[T, C]) TargetColumnName() string {
+	return (any)(opt.Column).(ColumnGetter).GetColumnName()
 }
 
-func (opt SortOption[T]) SortOrder() SortOrder {
+func (opt SortOption[T, C]) SortOrder() SortOrder {
 	return opt.Order
 }
 
-// ListOptions contains options and parameters related to data listing.
+// ListOptions contains options and parameters that related to data listing.
 type ListOptions struct {
 	FilterOptions
 	Offset      uint64
@@ -247,73 +258,111 @@ type columnSetter interface {
 	setColumnName(name string)
 }
 
-// Column represents a column of a table.
-type Column[T any] struct {
-	V    T
-	name string
+type ColumnGetter interface {
+	GetColumnName() string
 }
 
-// NewColumn creates a new Column of type T.
-func NewColumn[T any](v T) Column[T] {
-	return Column[T]{V: v}
+type ColumnName string
+
+func (cn ColumnName) GetColumnName() string {
+	return string(cn)
 }
 
-func (c Column[T]) MarshalJSON() ([]byte, error) {
-	return json.Marshal(c.V)
+func (cn *ColumnName) setColumnName(name string) {
+	*cn = ColumnName(name)
 }
 
-func (c *Column[T]) UnmarshalJSON(data []byte) error {
-	return json.Unmarshal(data, &c.V)
+type ColumnValue[T any] struct {
+	V T
 }
 
-func (c *Column[T]) setColumnName(name string) {
-	c.name = name
+func (cv ColumnValue[T]) MarshalJSON() ([]byte, error) {
+	return json.Marshal(cv.V)
 }
 
-func (c Column[T]) GetColumnName() string {
-	return c.name
+func (cv *ColumnValue[T]) UnmarshalJSON(data []byte) error {
+	return json.Unmarshal(data, &cv.V)
 }
 
 // Value implements the driver Valuer interface.
-func (c Column[T]) Value() (driver.Value, error) {
-	return driver.DefaultParameterConverter.ConvertValue(c.V)
+func (cv ColumnValue[T]) Value() (driver.Value, error) {
+	return driver.DefaultParameterConverter.ConvertValue(cv.V)
 }
 
 // Scan implements the Scanner interface.
-func (c *Column[T]) Scan(src any) error {
-	return sql.ConvertAssign(&c.V, src)
+func (cv *ColumnValue[T]) Scan(src any) error {
+	return sql.ConvertAssign(&cv.V, src)
 }
 
 // CreateClauses implements the CreateClausesInterface interface from GORM.
-func (c Column[T]) CreateClauses(f *schema.Field) []clause.Interface {
-	if fc, ok := any(c.V).(schema.CreateClausesInterface); ok {
+func (cv ColumnValue[T]) CreateClauses(f *schema.Field) []clause.Interface {
+	if fc, ok := any(cv.V).(schema.CreateClausesInterface); ok {
 		return fc.CreateClauses(f)
 	}
 	return nil
 }
 
 // QueryClauses implements the QueryClausesInterface interface from GORM.
-func (c Column[T]) QueryClauses(f *schema.Field) []clause.Interface {
-	if fc, ok := any(c.V).(schema.QueryClausesInterface); ok {
+func (cv ColumnValue[T]) QueryClauses(f *schema.Field) []clause.Interface {
+	if fc, ok := any(cv.V).(schema.QueryClausesInterface); ok {
 		return fc.QueryClauses(f)
 	}
 	return nil
 }
 
 // UpdateClauses implements the UpdateClausesInterface interface from GORM.
-func (c Column[T]) UpdateClauses(f *schema.Field) []clause.Interface {
-	if fc, ok := any(c.V).(schema.UpdateClausesInterface); ok {
+func (cv ColumnValue[T]) UpdateClauses(f *schema.Field) []clause.Interface {
+	if fc, ok := any(cv.V).(schema.UpdateClausesInterface); ok {
 		return fc.UpdateClauses(f)
 	}
 	return nil
 }
 
 // DeleteClauses implements the DeleteClausesInterface interface from GORM.
-func (c Column[T]) DeleteClauses(f *schema.Field) []clause.Interface {
-	if fc, ok := any(c.V).(schema.DeleteClausesInterface); ok {
+func (cv ColumnValue[T]) DeleteClauses(f *schema.Field) []clause.Interface {
+	if fc, ok := any(cv.V).(schema.DeleteClausesInterface); ok {
 		return fc.DeleteClauses(f)
 	}
 	return nil
+}
+
+// PtrColumn is used when declaring models with pointer fields, for example:
+/*
+type Model struct{
+	Name PtrColumn[string]
+}
+equals to
+type Model struct{
+	Name *string
+}
+*/
+type PtrColumn[T any] struct {
+	ColumnValue[*T]
+	ColumnName
+}
+
+// NewPtrColumn creates a new PtrColumn of type T.
+func NewPtrColumn[T any](v T) PtrColumn[T] {
+	return PtrColumn[T]{
+		ColumnValue: ColumnValue[*T]{
+			V: &v,
+		},
+	}
+}
+
+// Column represents a column of a table.
+type Column[T any] struct {
+	ColumnValue[T]
+	ColumnName
+}
+
+// NewColumn creates a new Column of type T.
+func NewColumn[T any](v T) Column[T] {
+	return Column[T]{
+		ColumnValue: ColumnValue[T]{
+			V: v,
+		},
+	}
 }
 
 // A NameFieldFunc gives the target filed a corresponding column name.
