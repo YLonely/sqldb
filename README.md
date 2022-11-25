@@ -66,11 +66,19 @@ func main(){
 	u, err := Users.Get(ctx, []sqldb.OpQueryOptionInterface{
 		// No more string literals, use .Columns() instead.
 		sqldb.NewEqualOption(Users.Columns().Name, "test"),
+		// Not recommended.
+		sqldb.OpQueryOption[string]{
+			Op: sqldb.OpEq,
+			Option: sqldb.Option[string]{
+				Column: "user_name",
+				Value: "test",
+			},
+		},
 	})
 }
 ```
 
-It is worth noting that you do not write string literals of columns when constructing query options, every `Model[T]` type has a method `Columns()` which returns a instance of type T, all fields of type `sqldb.Column` in type T are populated with column name during initialization.
+It is worth noting that you do not write string literals of columns when constructing query options, every `Model[T]` type has a method `Columns()` which returns a instance of type T, all fields of type `sqldb.Column` in type T are populated with column name during initialization. You can also use the option structs directly, but you have to confirm the column name by yourself, which is extremely not recommended.
 
 `sqldb.go` also defines a function type which abstracts transactions:
 ```golang
