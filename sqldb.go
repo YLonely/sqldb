@@ -37,21 +37,21 @@ type OptionInterface interface {
 }
 
 // Option implements the OptionInterface.
-type Option[T any, C Column[T] | PtrColumn[T]] struct {
-	Column C
+type Option[T any] struct {
+	Column string
 	Value  T
 }
 
 // NewOption returns an new Option.
-func NewOption[T any, C Column[T] | PtrColumn[T]](col C, v T) Option[T, C] {
-	return Option[T, C]{Column: col, Value: v}
+func NewOption[T any, C Column[T] | PtrColumn[T]](col C, v T) Option[T] {
+	return Option[T]{Column: (any)(col).(ColumnGetter).GetColumnName(), Value: v}
 }
 
-func (opt Option[T, C]) TargetColumnName() string {
-	return (any)(opt.Column).(ColumnGetter).GetColumnName()
+func (opt Option[T]) TargetColumnName() string {
+	return opt.Column
 }
 
-func (opt Option[T, C]) GetValue() any {
+func (opt Option[T]) GetValue() any {
 	return opt.Value
 }
 
@@ -64,21 +64,21 @@ type ValuesOptionInterface interface {
 }
 
 // ValuesOption implements the ValuesOptionInterface.
-type ValuesOption[T any, C Column[T] | PtrColumn[T]] struct {
-	Column C
+type ValuesOption[T comparable] struct {
+	Column string
 	Values []T
 }
 
 // NewValuesOption returns a new ValuesOption.
-func NewValuesOption[T any, C Column[T] | PtrColumn[T]](col C, vs []T) ValuesOption[T, C] {
-	return ValuesOption[T, C]{Column: col, Values: vs}
+func NewValuesOption[T comparable, C Column[T] | PtrColumn[T]](col C, vs []T) ValuesOption[T] {
+	return ValuesOption[T]{Column: (any)(col).(ColumnGetter).GetColumnName(), Values: vs}
 }
 
-func (opt ValuesOption[T, C]) TargetColumnName() string {
-	return (any)(opt.Column).(ColumnGetter).GetColumnName()
+func (opt ValuesOption[T]) TargetColumnName() string {
+	return opt.Column
 }
 
-func (opt ValuesOption[T, C]) GetValues() []any {
+func (opt ValuesOption[T]) GetValues() []any {
 	return lo.ToAnySlice(opt.Values)
 }
 
@@ -89,16 +89,16 @@ type OpQueryOptionInterface interface {
 }
 
 // OpQueryOption implements the OpQueryOptionInterface.
-type OpQueryOption[T any, C Column[T] | PtrColumn[T]] struct {
-	Option[T, C]
+type OpQueryOption[T comparable] struct {
+	Option[T]
 	Op QueryOp
 }
 
 // NewOpQueryOption creates an OpQueryOption.
-func NewOpQueryOption[T any, C Column[T] | PtrColumn[T]](col C, op QueryOp, v T) OpQueryOption[T, C] {
-	return OpQueryOption[T, C]{
-		Option: Option[T, C]{
-			Column: col,
+func NewOpQueryOption[T comparable, C Column[T] | PtrColumn[T]](col C, op QueryOp, v T) OpQueryOption[T] {
+	return OpQueryOption[T]{
+		Option: Option[T]{
+			Column: (any)(col).(ColumnGetter).GetColumnName(),
 			Value:  v,
 		},
 		Op: op,
@@ -106,36 +106,36 @@ func NewOpQueryOption[T any, C Column[T] | PtrColumn[T]](col C, op QueryOp, v T)
 }
 
 // NewEqualOption creates an OpQueryOption with operator OpEq.
-func NewEqualOption[T any, C Column[T] | PtrColumn[T]](col C, v T) OpQueryOption[T, C] {
+func NewEqualOption[T comparable, C Column[T] | PtrColumn[T]](col C, v T) OpQueryOption[T] {
 	return NewOpQueryOption(col, OpEq, v)
 }
 
 // NewNotEqualOption creates an OpQueryOption with operator OpNe.
-func NewNotEqualOption[T any, C Column[T] | PtrColumn[T]](col C, v T) OpQueryOption[T, C] {
+func NewNotEqualOption[T comparable, C Column[T] | PtrColumn[T]](col C, v T) OpQueryOption[T] {
 	return NewOpQueryOption(col, OpNe, v)
 }
 
 // NewGreaterOption creates an OpQueryOption with operator OpGt.
-func NewGreaterOption[T any, C Column[T] | PtrColumn[T]](col C, v T) OpQueryOption[T, C] {
+func NewGreaterOption[T comparable, C Column[T] | PtrColumn[T]](col C, v T) OpQueryOption[T] {
 	return NewOpQueryOption(col, OpGt, v)
 }
 
 // NewLessOption creates an OpQueryOption with operator OpLt.
-func NewLessOption[T any, C Column[T] | PtrColumn[T]](col C, v T) OpQueryOption[T, C] {
+func NewLessOption[T comparable, C Column[T] | PtrColumn[T]](col C, v T) OpQueryOption[T] {
 	return NewOpQueryOption(col, OpLt, v)
 }
 
 // NewGreaterEqualOption creates an OpQueryOption with operator OpGte.
-func NewGreaterEqualOption[T any, C Column[T] | PtrColumn[T]](col C, v T) OpQueryOption[T, C] {
+func NewGreaterEqualOption[T comparable, C Column[T] | PtrColumn[T]](col C, v T) OpQueryOption[T] {
 	return NewOpQueryOption(col, OpGte, v)
 }
 
 // NewLessEqualOption creates an OpQueryOption with operator OpLte.
-func NewLessEqualOption[T any, C Column[T] | PtrColumn[T]](col C, v T) OpQueryOption[T, C] {
+func NewLessEqualOption[T comparable, C Column[T] | PtrColumn[T]](col C, v T) OpQueryOption[T] {
 	return NewOpQueryOption(col, OpLte, v)
 }
 
-func (opt OpQueryOption[T, C]) QueryOp() QueryOp {
+func (opt OpQueryOption[T]) QueryOp() QueryOp {
 	return opt.Op
 }
 
@@ -145,13 +145,13 @@ type RangeQueryOptionInterface interface {
 }
 
 // RangeQueryOption implements the RangeQueryOptionInterface.
-type RangeQueryOption[T any, C Column[T] | PtrColumn[T]] struct {
-	ValuesOption[T, C]
+type RangeQueryOption[T comparable] struct {
+	ValuesOption[T]
 }
 
 // NewRangeQueryOption creates a new RangeQueryOption.
-func NewRangeQueryOption[T any, C Column[T] | PtrColumn[T]](col C, vs []T) RangeQueryOption[T, C] {
-	return RangeQueryOption[T, C]{
+func NewRangeQueryOption[T comparable, C Column[T] | PtrColumn[T]](col C, vs []T) RangeQueryOption[T] {
+	return RangeQueryOption[T]{
 		ValuesOption: NewValuesOption(col, vs),
 	}
 }
@@ -162,13 +162,13 @@ type FuzzyQueryOptionInterface interface {
 }
 
 // FuzzyQueryOption implements the FuzzyQueryOptionInterface.
-type FuzzyQueryOption[T any, C Column[T] | PtrColumn[T]] struct {
-	ValuesOption[T, C]
+type FuzzyQueryOption[T comparable] struct {
+	ValuesOption[T]
 }
 
 // NewFuzzyQueryOption creates a new FuzzyQueryOption.
-func NewFuzzyQueryOption[T any, C Column[T] | PtrColumn[T]](col C, vs []T) FuzzyQueryOption[T, C] {
-	return FuzzyQueryOption[T, C]{
+func NewFuzzyQueryOption[T comparable, C Column[T] | PtrColumn[T]](col C, vs []T) FuzzyQueryOption[T] {
+	return FuzzyQueryOption[T]{
 		ValuesOption: NewValuesOption(col, vs),
 	}
 }
@@ -179,13 +179,13 @@ type UpdateOptionInterface interface {
 }
 
 // UpdateOption implements the UpdateOptionInterface.
-type UpdateOption[T any, C Column[T] | PtrColumn[T]] struct {
-	Option[T, C]
+type UpdateOption[T any] struct {
+	Option[T]
 }
 
 // NewUpdateOption creates a new UpdateOption.
-func NewUpdateOption[T any, C Column[T] | PtrColumn[T]](col C, v T) UpdateOption[T, C] {
-	return UpdateOption[T, C]{
+func NewUpdateOption[T any, C Column[T] | PtrColumn[T]](col C, v T) UpdateOption[T] {
+	return UpdateOption[T]{
 		Option: NewOption(col, v),
 	}
 }
