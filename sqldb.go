@@ -326,15 +326,18 @@ func (cv ColumnValue[T]) DeleteClauses(f *schema.Field) []clause.Interface {
 	return nil
 }
 
-// PtrColumn is used when declaring models with pointer fields, for example:
 /*
-type Model struct{
-	Name PtrColumn[string]
-}
+PtrColumn is used when declaring models with pointer fields, for example:
+
+	type Model struct{
+		Name PtrColumn[string]
+	}
+
 equals to
-type Model struct{
-	Name *string
-}
+
+	type Model struct{
+		Name *string
+	}
 */
 type PtrColumn[T any] struct {
 	ColumnValue[*T]
