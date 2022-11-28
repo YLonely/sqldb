@@ -43,7 +43,7 @@ type Option[T any] struct {
 }
 
 // NewOption returns an new Option.
-func NewOption[T any, C Column[T] | PtrColumn[T]](col C, v T) Option[T] {
+func NewOption[T any, C ColumnType[T]](col C, v T) Option[T] {
 	return Option[T]{Column: (any)(col).(ColumnGetter).GetColumnName(), Value: v}
 }
 
@@ -70,7 +70,7 @@ type ValuesOption[T comparable] struct {
 }
 
 // NewValuesOption returns a new ValuesOption.
-func NewValuesOption[T comparable, C Column[T] | PtrColumn[T]](col C, vs []T) ValuesOption[T] {
+func NewValuesOption[T comparable, C ColumnType[T]](col C, vs []T) ValuesOption[T] {
 	return ValuesOption[T]{Column: (any)(col).(ColumnGetter).GetColumnName(), Values: vs}
 }
 
@@ -95,7 +95,7 @@ type OpQueryOption[T comparable] struct {
 }
 
 // NewOpQueryOption creates an OpQueryOption.
-func NewOpQueryOption[T comparable, C Column[T] | PtrColumn[T]](col C, op QueryOp, v T) OpQueryOption[T] {
+func NewOpQueryOption[T comparable, C ColumnType[T]](col C, op QueryOp, v T) OpQueryOption[T] {
 	return OpQueryOption[T]{
 		Option: Option[T]{
 			Column: (any)(col).(ColumnGetter).GetColumnName(),
@@ -106,32 +106,32 @@ func NewOpQueryOption[T comparable, C Column[T] | PtrColumn[T]](col C, op QueryO
 }
 
 // NewEqualOption creates an OpQueryOption with operator OpEq.
-func NewEqualOption[T comparable, C Column[T] | PtrColumn[T]](col C, v T) OpQueryOption[T] {
+func NewEqualOption[T comparable, C ColumnType[T]](col C, v T) OpQueryOption[T] {
 	return NewOpQueryOption(col, OpEq, v)
 }
 
 // NewNotEqualOption creates an OpQueryOption with operator OpNe.
-func NewNotEqualOption[T comparable, C Column[T] | PtrColumn[T]](col C, v T) OpQueryOption[T] {
+func NewNotEqualOption[T comparable, C ColumnType[T]](col C, v T) OpQueryOption[T] {
 	return NewOpQueryOption(col, OpNe, v)
 }
 
 // NewGreaterOption creates an OpQueryOption with operator OpGt.
-func NewGreaterOption[T comparable, C Column[T] | PtrColumn[T]](col C, v T) OpQueryOption[T] {
+func NewGreaterOption[T comparable, C ColumnType[T]](col C, v T) OpQueryOption[T] {
 	return NewOpQueryOption(col, OpGt, v)
 }
 
 // NewLessOption creates an OpQueryOption with operator OpLt.
-func NewLessOption[T comparable, C Column[T] | PtrColumn[T]](col C, v T) OpQueryOption[T] {
+func NewLessOption[T comparable, C ColumnType[T]](col C, v T) OpQueryOption[T] {
 	return NewOpQueryOption(col, OpLt, v)
 }
 
 // NewGreaterEqualOption creates an OpQueryOption with operator OpGte.
-func NewGreaterEqualOption[T comparable, C Column[T] | PtrColumn[T]](col C, v T) OpQueryOption[T] {
+func NewGreaterEqualOption[T comparable, C ColumnType[T]](col C, v T) OpQueryOption[T] {
 	return NewOpQueryOption(col, OpGte, v)
 }
 
 // NewLessEqualOption creates an OpQueryOption with operator OpLte.
-func NewLessEqualOption[T comparable, C Column[T] | PtrColumn[T]](col C, v T) OpQueryOption[T] {
+func NewLessEqualOption[T comparable, C ColumnType[T]](col C, v T) OpQueryOption[T] {
 	return NewOpQueryOption(col, OpLte, v)
 }
 
@@ -150,7 +150,7 @@ type RangeQueryOption[T comparable] struct {
 }
 
 // NewRangeQueryOption creates a new RangeQueryOption.
-func NewRangeQueryOption[T comparable, C Column[T] | PtrColumn[T]](col C, vs []T) RangeQueryOption[T] {
+func NewRangeQueryOption[T comparable, C ColumnType[T]](col C, vs []T) RangeQueryOption[T] {
 	return RangeQueryOption[T]{
 		ValuesOption: NewValuesOption(col, vs),
 	}
@@ -167,7 +167,7 @@ type FuzzyQueryOption[T comparable] struct {
 }
 
 // NewFuzzyQueryOption creates a new FuzzyQueryOption.
-func NewFuzzyQueryOption[T comparable, C Column[T] | PtrColumn[T]](col C, vs []T) FuzzyQueryOption[T] {
+func NewFuzzyQueryOption[T comparable, C ColumnType[T]](col C, vs []T) FuzzyQueryOption[T] {
 	return FuzzyQueryOption[T]{
 		ValuesOption: NewValuesOption(col, vs),
 	}
@@ -184,7 +184,7 @@ type UpdateOption[T any] struct {
 }
 
 // NewUpdateOption creates a new UpdateOption.
-func NewUpdateOption[T any, C Column[T] | PtrColumn[T]](col C, v T) UpdateOption[T] {
+func NewUpdateOption[T any, C ColumnType[T]](col C, v T) UpdateOption[T] {
 	return UpdateOption[T]{
 		Option: NewOption(col, v),
 	}
@@ -218,7 +218,7 @@ type SortOption[T comparable] struct {
 }
 
 // NewSortOption creates a new SortOption.
-func NewSortOption[T comparable, C Column[T] | PtrColumn[T]](col C, order SortOrder) SortOption[T] {
+func NewSortOption[T comparable, C ColumnType[T]](col C, order SortOrder) SortOption[T] {
 	return SortOption[T]{
 		Column: (any)(col).(ColumnGetter).GetColumnName(),
 		Order:  order,
@@ -226,7 +226,7 @@ func NewSortOption[T comparable, C Column[T] | PtrColumn[T]](col C, order SortOr
 }
 
 func (opt SortOption[T]) TargetColumnName() string {
-	return (any)(opt.Column).(ColumnGetter).GetColumnName()
+	return opt.Column
 }
 
 func (opt SortOption[T]) SortOrder() SortOrder {
@@ -366,6 +366,11 @@ func NewColumn[T any](v T) Column[T] {
 			V: v,
 		},
 	}
+}
+
+// ColumnType contains valid column types.
+type ColumnType[T any] interface {
+	Column[T] | PtrColumn[T]
 }
 
 // A NameFieldFunc gives the target filed a corresponding column name.
