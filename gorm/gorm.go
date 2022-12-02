@@ -93,7 +93,7 @@ func (m Model[T]) Update(ctx context.Context, query sqldb.FilterOptions, opts []
 	}
 	updateMap := map[string]any{}
 	for _, opt := range opts {
-		updateMap[opt.TargetColumnName()] = opt.GetValue()
+		updateMap[string(opt.TargetColumnName())] = opt.GetValue()
 	}
 	res := applyFilterOptions(m.dbInstance(ctx), query).Model(new(T)).Updates(updateMap)
 	if res.Error != nil {
@@ -111,7 +111,7 @@ func (m Model[T]) Get(ctx context.Context, opts []sqldb.OpQueryOptionInterface) 
 		return nil, errors.New("empty options")
 	}
 	entity = new(T)
-	err = applyIsQueryOptions(m.dbInstance(ctx), opts).First(entity).Error
+	err = applyOpQueryOptions(m.dbInstance(ctx), opts).First(entity).Error
 	return
 }
 
@@ -147,7 +147,7 @@ func applyFilterOptions(db *gorm.DB, opts sqldb.FilterOptions) *gorm.DB {
 	return applyFuzzyQueryOptions(
 		applyRangeQueryOptions(
 			applyRangeQueryOptions(
-				applyIsQueryOptions(
+				applyOpQueryOptions(
 					db,
 					opts.OpOptions,
 				),
@@ -161,7 +161,7 @@ func applyFilterOptions(db *gorm.DB, opts sqldb.FilterOptions) *gorm.DB {
 	)
 }
 
-func applyIsQueryOptions(db *gorm.DB, opts []sqldb.OpQueryOptionInterface) *gorm.DB {
+func applyOpQueryOptions(db *gorm.DB, opts []sqldb.OpQueryOptionInterface) *gorm.DB {
 	if len(opts) == 0 {
 		return db
 	}

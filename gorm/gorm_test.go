@@ -69,14 +69,14 @@ func TestField(t *testing.T) {
 	db, clean := initDB(t)
 	defer clean()
 	m := NewModel[User](db)
-	assert.Equal(t, "user_name", m.Columns().Name.GetColumnName())
-	assert.Equal(t, "age", m.Columns().Age.GetColumnName())
-	assert.Equal(t, "created_at", m.Columns().CreatedAt.GetColumnName())
-	assert.Equal(t, "address", m.Columns().Address.GetColumnName())
-	assert.Equal(t, "status", m.Columns().Status.GetColumnName())
-	assert.Equal(t, "weight", m.Columns().Weight.GetColumnName())
-	assert.Equal(t, "extra_email", m.Columns().Extra.Email.GetColumnName())
-	assert.Equal(t, "extra_data", m.Columns().Extra.Inner.Data.GetColumnName())
+	assert.Equal(t, "user_name", string(m.Columns().Name.ColumnName))
+	assert.Equal(t, "age", string(m.Columns().Age.ColumnName))
+	assert.Equal(t, "created_at", string(m.Columns().CreatedAt.ColumnName))
+	assert.Equal(t, "address", string(m.Columns().Address.ColumnName))
+	assert.Equal(t, "status", string(m.Columns().Status.ColumnName))
+	assert.Equal(t, "weight", string(m.Columns().Weight.ColumnName))
+	assert.Equal(t, "extra_email", string(m.Columns().Extra.Email.ColumnName))
+	assert.Equal(t, "extra_data", string(m.Columns().Extra.Inner.Data.ColumnName))
 }
 
 func initDB(t *testing.T) (*gorm.DB, func()) {

@@ -31,14 +31,14 @@ const (
 // OptionInterface wraps basic methods of options.
 type OptionInterface interface {
 	// TargetColumnName returns the name of the column an operation processes against.
-	TargetColumnName() string
+	TargetColumnName() ColumnName
 	// GetValue returns the value the option carries. It is used by the operation to query or update the target column.
 	GetValue() any
 }
 
 // Option implements the OptionInterface.
 type Option[T any] struct {
-	Column string
+	Column ColumnName
 	Value  T
 }
 
@@ -47,7 +47,7 @@ func NewOption[T any, C ColumnType[T]](col C, v T) Option[T] {
 	return Option[T]{Column: (any)(col).(ColumnGetter).GetColumnName(), Value: v}
 }
 
-func (opt Option[T]) TargetColumnName() string {
+func (opt Option[T]) TargetColumnName() ColumnName {
 	return opt.Column
 }
 
@@ -58,14 +58,14 @@ func (opt Option[T]) GetValue() any {
 // ValuesOptionInterface wraps basic method of options which carry multiple values.
 type ValuesOptionInterface interface {
 	// TargetColumnName returns the name of the column an operation processes against.
-	TargetColumnName() string
+	TargetColumnName() ColumnName
 	// GetValues returns the values the option carries. Those values are used to query data.
 	GetValues() []any
 }
 
 // ValuesOption implements the ValuesOptionInterface.
 type ValuesOption[T comparable] struct {
-	Column string
+	Column ColumnName
 	Values []T
 }
 
@@ -74,7 +74,7 @@ func NewValuesOption[T comparable, C ColumnType[T]](col C, vs []T) ValuesOption[
 	return ValuesOption[T]{Column: (any)(col).(ColumnGetter).GetColumnName(), Values: vs}
 }
 
-func (opt ValuesOption[T]) TargetColumnName() string {
+func (opt ValuesOption[T]) TargetColumnName() ColumnName {
 	return opt.Column
 }
 
@@ -207,13 +207,13 @@ const (
 
 // SortOptionInterface represents an sort operation.
 type SortOptionInterface interface {
-	TargetColumnName() string
+	TargetColumnName() ColumnName
 	SortOrder() SortOrder
 }
 
 // SortOption implements the SortOptionInterface.
 type SortOption[T comparable] struct {
-	Column string
+	Column ColumnName
 	Order  SortOrder
 }
 
@@ -225,7 +225,7 @@ func NewSortOption[T comparable, C ColumnType[T]](col C, order SortOrder) SortOp
 	}
 }
 
-func (opt SortOption[T]) TargetColumnName() string {
+func (opt SortOption[T]) TargetColumnName() ColumnName {
 	return opt.Column
 }
 
@@ -259,13 +259,13 @@ type columnSetter interface {
 }
 
 type ColumnGetter interface {
-	GetColumnName() string
+	GetColumnName() ColumnName
 }
 
 type ColumnName string
 
-func (cn ColumnName) GetColumnName() string {
-	return string(cn)
+func (cn ColumnName) GetColumnName() ColumnName {
+	return cn
 }
 
 func (cn *ColumnName) setColumnName(name string) {
