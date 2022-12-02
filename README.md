@@ -70,7 +70,7 @@ func main(){
 		sqldb.OpQueryOption[string]{
 			Op: sqldb.OpEq,
 			Option: sqldb.Option[string]{
-				Column: "user_name",
+				Column: sqldb.ColumnName("user_name"),
 				Value: "test",
 			},
 		},
