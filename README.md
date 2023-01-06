@@ -9,7 +9,7 @@ It also provides an implementation of the interfaces based on the [GORM](https:/
 
 # Getting Started
 
-A `Model` defined in `sqldb.go` contains a set of commonly used methods when handling data in a database.
+The `Model` defined in `model.go` contains a set of commonly used methods when handling data in a database.
 ```golang
 type Model[T any] interface {
 	Columns() T
@@ -40,7 +40,6 @@ import (
 	"context"
 
 	"github.com/YLonely/sqldb"
-	sqlgorm "github.com/YLonely/sqldb/gorm"
 )
 
 func main(){
@@ -51,7 +50,7 @@ func main(){
 		panic(err)
 	}
 
-	var Users sqldb.Model[User] = sqlgorm.NewModel[User](db)
+	Users := sqldb.NewModel[User](db)
 	ctx := context.Background()
 
 	// To create a new user
@@ -87,7 +86,7 @@ type TransactionFunc func(ctx context.Context, run func(context.Context) error) 
 
 To create a `TransactionFunc` implemented by GORM and process models in the transaction:
 ```golang
-Transaction := gorm.NewTransactionFunc(db)
+Transaction := sqldb.NewTransactionFunc(db)
 
 Transaction(context.Background(), func(ctx context.Context) error {
 	if err := Users.Delete(ctx, sqldb.FilterOptions{

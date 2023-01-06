@@ -1,4 +1,4 @@
-package gorm
+package sqldb
 
 import (
 	"context"
@@ -10,9 +10,10 @@ import (
 	"github.com/samber/lo"
 	"gorm.io/gorm"
 	"gorm.io/gorm/schema"
-
-	"github.com/YLonely/sqldb"
 )
+
+// A TransactionFunc starts a transaction.
+type TransactionFunc func(ctx context.Context, run func(context.Context) error) error
 
 type contextKey int
 
@@ -32,7 +33,7 @@ func TransactionFrom(ctx context.Context) *gorm.DB {
 }
 
 // NewTransactionFunc returns a TransactionFunc.
-func NewTransactionFunc(db *gorm.DB) sqldb.TransactionFunc {
+func NewTransactionFunc(db *gorm.DB) TransactionFunc {
 	return func(ctx context.Context, run func(context.Context) error) error {
 		if tx := TransactionFrom(ctx); tx != nil {
 			return tx.Transaction(func(tx *gorm.DB) error {
@@ -45,23 +46,35 @@ func NewTransactionFunc(db *gorm.DB) sqldb.TransactionFunc {
 	}
 }
 
-// Model implements the sqldb.Model interface.
-type Model[T any] struct {
-	sqldb.ColumnHint[T]
+// Model is an interface defines commonly used methods to manipulate data.
+type Model[T any] interface {
+	// Columns returns a instance of type T,
+	// all fields of type sqldb.Column[U] in the instance are populated with corresponding column name.
+	Columns() T
+	Create(ctx context.Context, entity *T) error
+	Get(ctx context.Context, opts []OpQueryOptionInterface) (*T, error)
+	List(ctx context.Context, opts ListOptions) ([]*T, uint64, error)
+	Update(ctx context.Context, query FilterOptions, opts []UpdateOptionInterface) (uint64, error)
+	Delete(ctx context.Context, opts FilterOptions) error
+}
+
+// model implements the Model interface.
+type model[T any] struct {
+	ColumnHint[T]
 	db *gorm.DB
 }
 
-var _ sqldb.Model[struct{}] = Model[struct{}]{}
+var _ Model[struct{}] = model[struct{}]{}
 
 // NewModel returns a new Model.
 func NewModel[T any](db *gorm.DB) Model[T] {
-	return Model[T]{
-		ColumnHint: sqldb.NewColumnHint[T](buildNameColumnFunc(db)),
+	return model[T]{
+		ColumnHint: NewColumnHint[T](buildNameColumnFunc(db)),
 		db:         db,
 	}
 }
 
-func buildNameColumnFunc(db *gorm.DB) sqldb.NameFieldFunc {
+func buildNameColumnFunc(db *gorm.DB) NameFieldFunc {
 	return func(sf reflect.StructField, parents ...reflect.StructField) string {
 		tagSettings := schema.ParseTagSetting(sf.Tag.Get("gorm"), ";")
 		column := tagSettings["COLUMN"]
@@ -80,14 +93,14 @@ func buildNameColumnFunc(db *gorm.DB) sqldb.NameFieldFunc {
 	}
 }
 
-func (m Model[T]) dbInstance(ctx context.Context) *gorm.DB {
+func (m model[T]) dbInstance(ctx context.Context) *gorm.DB {
 	if tx := TransactionFrom(ctx); tx != nil {
 		return tx.WithContext(ctx)
 	}
 	return m.db.WithContext(ctx)
 }
 
-func (m Model[T]) Update(ctx context.Context, query sqldb.FilterOptions, opts []sqldb.UpdateOptionInterface) (uint64, error) {
+func (m model[T]) Update(ctx context.Context, query FilterOptions, opts []UpdateOptionInterface) (uint64, error) {
 	if len(opts) == 0 {
 		return 0, errors.New("empty options")
 	}
@@ -102,11 +115,11 @@ func (m Model[T]) Update(ctx context.Context, query sqldb.FilterOptions, opts []
 	return uint64(res.RowsAffected), nil
 }
 
-func (m Model[T]) Delete(ctx context.Context, opts sqldb.FilterOptions) error {
+func (m model[T]) Delete(ctx context.Context, opts FilterOptions) error {
 	return applyFilterOptions(m.dbInstance(ctx), opts).Delete(new(T)).Error
 }
 
-func (m Model[T]) Get(ctx context.Context, opts []sqldb.OpQueryOptionInterface) (entity *T, err error) {
+func (m model[T]) Get(ctx context.Context, opts []OpQueryOptionInterface) (entity *T, err error) {
 	if len(opts) == 0 {
 		return nil, errors.New("empty options")
 	}
@@ -115,11 +128,11 @@ func (m Model[T]) Get(ctx context.Context, opts []sqldb.OpQueryOptionInterface) 
 	return
 }
 
-func (m Model[T]) Create(ctx context.Context, entity *T) error {
+func (m model[T]) Create(ctx context.Context, entity *T) error {
 	return m.dbInstance(ctx).Create(entity).Error
 }
 
-func (m Model[T]) List(ctx context.Context, opts sqldb.ListOptions) (entities []*T, total uint64, err error) {
+func (m model[T]) List(ctx context.Context, opts ListOptions) (entities []*T, total uint64, err error) {
 	db := m.dbInstance(ctx).Model(new(T))
 	var t int64
 	if err = applyFilterOptions(db, opts.FilterOptions).Count(&t).Error; err != nil {
@@ -143,7 +156,7 @@ func (m Model[T]) List(ctx context.Context, opts sqldb.ListOptions) (entities []
 	return
 }
 
-func applyFilterOptions(db *gorm.DB, opts sqldb.FilterOptions) *gorm.DB {
+func applyFilterOptions(db *gorm.DB, opts FilterOptions) *gorm.DB {
 	return applyFuzzyQueryOptions(
 		applyRangeQueryOptions(
 			applyRangeQueryOptions(
@@ -161,34 +174,34 @@ func applyFilterOptions(db *gorm.DB, opts sqldb.FilterOptions) *gorm.DB {
 	)
 }
 
-func applyOpQueryOptions(db *gorm.DB, opts []sqldb.OpQueryOptionInterface) *gorm.DB {
+func applyOpQueryOptions(db *gorm.DB, opts []OpQueryOptionInterface) *gorm.DB {
 	if len(opts) == 0 {
 		return db
 	}
-	query := strings.Join(lo.Map(opts, func(opt sqldb.OpQueryOptionInterface, _ int) string {
+	query := strings.Join(lo.Map(opts, func(opt OpQueryOptionInterface, _ int) string {
 		if opt.QueryOp() == "" {
 			panic("Op must be provided in IsQueryOption")
 		}
 		return fmt.Sprintf("%s %s ?", opt.TargetColumnName(), opt.QueryOp())
 	}), " AND ")
-	return db.Where(query, lo.Map(opts, func(opt sqldb.OpQueryOptionInterface, _ int) any { return opt.GetValue() })...)
+	return db.Where(query, lo.Map(opts, func(opt OpQueryOptionInterface, _ int) any { return opt.GetValue() })...)
 }
 
-func applyRangeQueryOptions(db *gorm.DB, op string, opts []sqldb.RangeQueryOptionInterface) *gorm.DB {
+func applyRangeQueryOptions(db *gorm.DB, op string, opts []RangeQueryOptionInterface) *gorm.DB {
 	if len(opts) == 0 {
 		return db
 	}
-	query := strings.Join(lo.Map(opts, func(opt sqldb.RangeQueryOptionInterface, _ int) string {
+	query := strings.Join(lo.Map(opts, func(opt RangeQueryOptionInterface, _ int) string {
 		return fmt.Sprintf("%s %s (?)", opt.TargetColumnName(), op)
 	}), " AND ")
-	return db.Where(query, lo.Map(opts, func(opt sqldb.RangeQueryOptionInterface, _ int) any { return opt.GetValues() })...)
+	return db.Where(query, lo.Map(opts, func(opt RangeQueryOptionInterface, _ int) any { return opt.GetValues() })...)
 }
 
-func applyFuzzyQueryOptions(db *gorm.DB, opts []sqldb.FuzzyQueryOptionInterface) *gorm.DB {
+func applyFuzzyQueryOptions(db *gorm.DB, opts []FuzzyQueryOptionInterface) *gorm.DB {
 	if len(opts) == 0 {
 		return db
 	}
-	lo.ForEach(opts, func(opt sqldb.FuzzyQueryOptionInterface, _ int) {
+	lo.ForEach(opts, func(opt FuzzyQueryOptionInterface, _ int) {
 		queries := lo.Map(opt.GetValues(), func(_ any, _ int) string {
 			return fmt.Sprintf("%s LIKE ?", opt.TargetColumnName())
 		})

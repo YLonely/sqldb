@@ -1,7 +1,6 @@
 package sqldb
 
 import (
-	"context"
 	"database/sql/driver"
 	"encoding/json"
 	"errors"
@@ -13,9 +12,6 @@ import (
 
 	"github.com/YLonely/sqldb/internal/sql"
 )
-
-// A TransactionFunc starts a transaction.
-type TransactionFunc func(ctx context.Context, run func(context.Context) error) error
 
 type QueryOp string
 
@@ -239,18 +235,6 @@ type ListOptions struct {
 	Offset      uint64
 	Limit       uint64
 	SortOptions []SortOptionInterface
-}
-
-// Model is an interface defines commonly used methods to manipulate data.
-type Model[T any] interface {
-	// Columns returns a instance of type T,
-	// all fields of type sqldb.Column[U] in the instance are populated with corresponding column name.
-	Columns() T
-	Create(ctx context.Context, entity *T) error
-	Get(ctx context.Context, opts []OpQueryOptionInterface) (*T, error)
-	List(ctx context.Context, opts ListOptions) ([]*T, uint64, error)
-	Update(ctx context.Context, query FilterOptions, opts []UpdateOptionInterface) (uint64, error)
-	Delete(ctx context.Context, opts FilterOptions) error
 }
 
 // columnSetter sets the column name of a filed
