@@ -205,11 +205,13 @@ func TestUpdate(t *testing.T) {
 			opts: []UpdateOptionInterface{
 				NewUpdateOption(m.Columns().Name, ""),
 				NewUpdateOption(m.Columns().Age, 10),
+				NewUpdateOption(m.Columns().Status, Status{Occupation: "test"}),
 			},
 			expect: []User{func() User {
 				u := *u1
 				u.Name.V = ""
 				u.Age.V = 10
+				u.Status.V.Occupation = "test"
 				return u
 			}(), *u2, *u3, *u4},
 		},

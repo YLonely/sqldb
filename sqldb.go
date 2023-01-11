@@ -3,12 +3,10 @@ package sqldb
 import (
 	"database/sql/driver"
 	"encoding/json"
-	"errors"
-	"reflect"
 
 	"github.com/samber/lo"
 	"gorm.io/gorm/clause"
-	"gorm.io/gorm/schema"
+	gormschema "gorm.io/gorm/schema"
 
 	"github.com/YLonely/sqldb/internal/sql"
 )
@@ -279,32 +277,32 @@ func (cv *ColumnValue[T]) Scan(src any) error {
 }
 
 // CreateClauses implements the CreateClausesInterface interface from GORM.
-func (cv ColumnValue[T]) CreateClauses(f *schema.Field) []clause.Interface {
-	if fc, ok := any(cv.V).(schema.CreateClausesInterface); ok {
+func (cv ColumnValue[T]) CreateClauses(f *gormschema.Field) []clause.Interface {
+	if fc, ok := any(cv.V).(gormschema.CreateClausesInterface); ok {
 		return fc.CreateClauses(f)
 	}
 	return nil
 }
 
 // QueryClauses implements the QueryClausesInterface interface from GORM.
-func (cv ColumnValue[T]) QueryClauses(f *schema.Field) []clause.Interface {
-	if fc, ok := any(cv.V).(schema.QueryClausesInterface); ok {
+func (cv ColumnValue[T]) QueryClauses(f *gormschema.Field) []clause.Interface {
+	if fc, ok := any(cv.V).(gormschema.QueryClausesInterface); ok {
 		return fc.QueryClauses(f)
 	}
 	return nil
 }
 
 // UpdateClauses implements the UpdateClausesInterface interface from GORM.
-func (cv ColumnValue[T]) UpdateClauses(f *schema.Field) []clause.Interface {
-	if fc, ok := any(cv.V).(schema.UpdateClausesInterface); ok {
+func (cv ColumnValue[T]) UpdateClauses(f *gormschema.Field) []clause.Interface {
+	if fc, ok := any(cv.V).(gormschema.UpdateClausesInterface); ok {
 		return fc.UpdateClauses(f)
 	}
 	return nil
 }
 
 // DeleteClauses implements the DeleteClausesInterface interface from GORM.
-func (cv ColumnValue[T]) DeleteClauses(f *schema.Field) []clause.Interface {
-	if fc, ok := any(cv.V).(schema.DeleteClausesInterface); ok {
+func (cv ColumnValue[T]) DeleteClauses(f *gormschema.Field) []clause.Interface {
+	if fc, ok := any(cv.V).(gormschema.DeleteClausesInterface); ok {
 		return fc.DeleteClauses(f)
 	}
 	return nil
@@ -355,49 +353,4 @@ func NewColumn[T any](v T) Column[T] {
 // ColumnType contains valid column types.
 type ColumnType[T any] interface {
 	Column[T] | PtrColumn[T]
-}
-
-// A NameFieldFunc gives the target filed a corresponding column name.
-type NameFieldFunc func(target reflect.StructField, parents ...reflect.StructField) string
-
-func populateColumns(obj any, nameColumn NameFieldFunc, parents ...reflect.StructField) error {
-	rv := reflect.ValueOf(obj)
-	if rv.Kind() != reflect.Pointer || rv.IsNil() {
-		return errors.New("object provided is not a ptr or it's nil")
-	}
-	e := rv.Elem()
-	if e.Kind() != reflect.Struct {
-		return errors.New("object provided is not the reference of a struct")
-	}
-	for i := 0; i < e.NumField(); i++ {
-		fieldAddr := e.Field(i).Addr()
-		field := e.Type().Field(i)
-		if setter, ok := fieldAddr.Interface().(columnSetter); ok {
-			setter.setColumnName(nameColumn(field, parents...))
-		} else {
-			if err := populateColumns(fieldAddr.Interface(), nameColumn, append(parents, field)...); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-// ColumnHint is supposed to be embedded into structs to implement the Model interface.
-type ColumnHint[T any] struct {
-	columns *T
-}
-
-func (ch ColumnHint[T]) Columns() T {
-	return *ch.columns
-}
-
-func NewColumnHint[T any](f NameFieldFunc) ColumnHint[T] {
-	m := new(T)
-	if err := populateColumns(m, f); err != nil {
-		panic(err)
-	}
-	return ColumnHint[T]{
-		columns: m,
-	}
 }

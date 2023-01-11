@@ -9,7 +9,7 @@ import (
 
 	"github.com/samber/lo"
 	"gorm.io/gorm"
-	"gorm.io/gorm/schema"
+	gormschema "gorm.io/gorm/schema"
 )
 
 // A TransactionFunc starts a transaction.
@@ -60,37 +60,79 @@ type Model[T any] interface {
 
 // model implements the Model interface.
 type model[T any] struct {
-	ColumnHint[T]
+	columns           *T
+	columnSerializers map[string]columnSerializer
+
 	db *gorm.DB
 }
 
 var _ Model[struct{}] = model[struct{}]{}
 
+type columnSerializer func(context.Context, any) (any, error)
+
 // NewModel returns a new Model.
 func NewModel[T any](db *gorm.DB) Model[T] {
+	var (
+		m           = new(T)
+		serializers = map[string]columnSerializer{}
+	)
+	elem := reflect.TypeOf(m).Elem()
+	if elem.Kind() != reflect.Struct {
+		panic(fmt.Errorf("%s is not a struct", elem.String()))
+	}
+
+	if err := iterateFields(m, func(fieldAddr reflect.Value, path []reflect.StructField) bool {
+		if setter, ok := fieldAddr.Interface().(columnSetter); ok {
+			name, s := parseColumn(db, path)
+			setter.setColumnName(name)
+			if s != nil {
+				serializers[name] = s
+			}
+			return false
+		}
+		return true
+	}); err != nil {
+		panic(err)
+	}
+
 	return model[T]{
-		ColumnHint: NewColumnHint[T](buildNameColumnFunc(db)),
-		db:         db,
+		columns:           m,
+		columnSerializers: serializers,
+		db:                db,
 	}
 }
 
-func buildNameColumnFunc(db *gorm.DB) NameFieldFunc {
-	return func(sf reflect.StructField, parents ...reflect.StructField) string {
-		tagSettings := schema.ParseTagSetting(sf.Tag.Get("gorm"), ";")
-		column := tagSettings["COLUMN"]
-		if column == "" {
-			column = db.NamingStrategy.ColumnName("", sf.Name)
-			var prefix string
-			for _, p := range parents {
-				tagSettings := schema.ParseTagSetting(p.Tag.Get("gorm"), ";")
-				if p := tagSettings["EMBEDDEDPREFIX"]; p != "" && tagSettings["EMBEDDED"] != "" {
-					prefix += p
-				}
+func parseColumn(db *gorm.DB, path []reflect.StructField) (string, columnSerializer) {
+	var (
+		l              = len(path)
+		sf, parents    = path[l-1], path[:l-1]
+		tagSettings    = gormschema.ParseTagSetting(sf.Tag.Get("gorm"), ";")
+		column         = tagSettings["COLUMN"]
+		serializerName = tagSettings["SERIALIZER"]
+		serializer     columnSerializer
+	)
+	if column == "" {
+		column = db.NamingStrategy.ColumnName("", sf.Name)
+		var prefix string
+		for _, p := range parents {
+			tagSettings := gormschema.ParseTagSetting(p.Tag.Get("gorm"), ";")
+			if p := tagSettings["EMBEDDEDPREFIX"]; p != "" && tagSettings["EMBEDDED"] != "" {
+				prefix += p
 			}
-			column = prefix + column
 		}
-		return column
+		column = prefix + column
 	}
+	if serializerName != "" {
+		if s, exist := gormschema.GetSerializer(serializerName); exist {
+			serializer = func(ctx context.Context, v any) (any, error) {
+				if v == nil {
+					return nil, errors.New("serialize: nil value")
+				}
+				return s.Value(ctx, &gormschema.Field{}, reflect.Value{}, v)
+			}
+		}
+	}
+	return column, serializer
 }
 
 func (m model[T]) dbInstance(ctx context.Context) *gorm.DB {
@@ -100,13 +142,26 @@ func (m model[T]) dbInstance(ctx context.Context) *gorm.DB {
 	return m.db.WithContext(ctx)
 }
 
+func (m model[T]) Columns() T {
+	return *m.columns
+}
+
 func (m model[T]) Update(ctx context.Context, query FilterOptions, opts []UpdateOptionInterface) (uint64, error) {
 	if len(opts) == 0 {
 		return 0, errors.New("empty options")
 	}
 	updateMap := map[string]any{}
 	for _, opt := range opts {
-		updateMap[string(opt.TargetColumnName())] = opt.GetValue()
+		name := string(opt.TargetColumnName())
+		value := opt.GetValue()
+		if s, exist := m.columnSerializers[name]; exist {
+			v, err := s(ctx, value)
+			if err != nil {
+				return 0, fmt.Errorf("failed to serialize the value of the column %s: %w", name, err)
+			}
+			value = v
+		}
+		updateMap[name] = value
 	}
 	res := applyFilterOptions(m.dbInstance(ctx), query).Model(new(T)).Updates(updateMap)
 	if res.Error != nil {
