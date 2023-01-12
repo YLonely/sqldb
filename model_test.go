@@ -193,9 +193,10 @@ func TestUpdate(t *testing.T) {
 	Transaction := NewTransactionFunc(db)
 
 	for _, c := range []struct {
-		query  FilterOptions
-		opts   []UpdateOptionInterface
-		expect []User
+		query        FilterOptions
+		opts         []UpdateOptionInterface
+		expect       []User
+		updatedTotal uint64
 	}{
 		{
 			query: FilterOptions{
@@ -215,6 +216,7 @@ func TestUpdate(t *testing.T) {
 				u.Status.V.Occupation = "test"
 				return u
 			}(), *u2, *u3, *u4},
+			updatedTotal: 1,
 		},
 		{
 			query: FilterOptions{
@@ -235,11 +237,13 @@ func TestUpdate(t *testing.T) {
 				u.Weight.V = 1000
 				return u
 			}()},
+			updatedTotal: 2,
 		},
 	} {
 		Transaction(ctx, func(ctx context.Context) error {
-			_, err := m.Update(ctx, c.query, c.opts)
+			total, err := m.Update(ctx, c.query, c.opts)
 			assert.Nil(t, err, err)
+			assert.Equal(t, c.updatedTotal, total)
 			users, _, err := m.List(ctx, ListOptions{})
 			assert.Nil(t, err, err)
 			assert.EqualValues(t, c.expect, lo.Map(users, func(item *User, _ int) User { return *item }))
