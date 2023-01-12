@@ -110,6 +110,7 @@ func TestDelete(t *testing.T) {
 			opts: FilterOptions{
 				OpOptions: []OpQueryOptionInterface{
 					NewEqualOption(m.Columns().Name, "William K Turner"),
+					NewEqualOption(m.Columns().Status, Status{Occupation: "Health Educator"}),
 				},
 			},
 			expect: []User{*u2, *u3, *u4},
@@ -262,6 +263,17 @@ func TestList(t *testing.T) {
 			opts: ListOptions{
 				FilterOptions: FilterOptions{
 					OpOptions: []OpQueryOptionInterface{
+						NewEqualOption(m.Columns().Status, Status{Occupation: "Teacher"}),
+					},
+				},
+			},
+			expectTotal: 1,
+			expect:      []User{*u3},
+		},
+		{
+			opts: ListOptions{
+				FilterOptions: FilterOptions{
+					OpOptions: []OpQueryOptionInterface{
 						NewLessOption(m.Columns().Weight, uint(101)),
 					},
 				},
@@ -364,6 +376,7 @@ func TestGet(t *testing.T) {
 	user, err := m.Get(ctx, []OpQueryOptionInterface{
 		NewEqualOption(m.Columns().ID, uint64(4)),
 		NewEqualOption(m.Columns().Extra.Email, "jake.andrews@163.com"),
+		NewEqualOption(m.Columns().Status, Status{Occupation: "Collage student"}),
 	})
 	assert.Nil(t, err)
 	assert.Equal(t, u4, user)

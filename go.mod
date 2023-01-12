@@ -4,6 +4,7 @@ go 1.18
 
 require (
 	github.com/samber/lo v1.33.0
+	github.com/samber/mo v1.7.0
 	github.com/stretchr/testify v1.8.0
 	gorm.io/driver/sqlite v1.4.2
 	gorm.io/gorm v1.24.0
