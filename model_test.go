@@ -14,12 +14,12 @@ import (
 )
 
 type User struct {
-	ID      Column[uint64] `gorm:"column:id;primaryKey"`
-	Name    Column[string] `gorm:"column:user_name"`
-	Age     Column[int]
-	Address PtrColumn[string]
-	Status  Column[Status] `gorm:"serializer:json"`
-	Embedded
+	ID        Column[uint64] `gorm:"column:id;primaryKey"`
+	Name      Column[string] `gorm:"column:user_name"`
+	Age       Column[int]
+	Address   PtrColumn[string]
+	Status    Column[Status] `gorm:"serializer:json"`
+	Embedded  `gorm:"embeddedPrefix:embedded_"`
 	Extra     Extra `gorm:"embedded;embeddedPrefix:extra_"`
 	CreatedAt Column[time.Time]
 	DeletedAt Column[gorm.DeletedAt]
@@ -72,7 +72,7 @@ func TestField(t *testing.T) {
 	assert.Equal(t, "created_at", string(m.Columns().CreatedAt.ColumnName))
 	assert.Equal(t, "address", string(m.Columns().Address.ColumnName))
 	assert.Equal(t, "status", string(m.Columns().Status.ColumnName))
-	assert.Equal(t, "weight", string(m.Columns().Weight.ColumnName))
+	assert.Equal(t, "embedded_weight", string(m.Columns().Weight.ColumnName))
 	assert.Equal(t, "extra_email", string(m.Columns().Extra.Email.ColumnName))
 	assert.Equal(t, "extra_data", string(m.Columns().Extra.Inner.Data.ColumnName))
 }

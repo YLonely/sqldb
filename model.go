@@ -111,18 +111,20 @@ func parseColumn(db *gorm.DB, path []reflect.StructField) (string, columnSeriali
 		column         = tagSettings["COLUMN"]
 		serializerName = tagSettings["SERIALIZER"]
 		serializer     columnSerializer
+		prefix         string
 	)
 	if column == "" {
 		column = db.NamingStrategy.ColumnName("", sf.Name)
-		var prefix string
-		for _, p := range parents {
-			tagSettings := gormschema.ParseTagSetting(p.Tag.Get("gorm"), ";")
-			if p := tagSettings["EMBEDDEDPREFIX"]; p != "" && tagSettings["EMBEDDED"] != "" {
-				prefix += p
-			}
-		}
-		column = prefix + column
 	}
+
+	for _, pf := range parents {
+		tagSettings := gormschema.ParseTagSetting(pf.Tag.Get("gorm"), ";")
+		if p := tagSettings["EMBEDDEDPREFIX"]; p != "" && (tagSettings["EMBEDDED"] != "" || pf.Anonymous) {
+			prefix += p
+		}
+	}
+	column = prefix + column
+
 	if serializerName != "" {
 		if s, exist := gormschema.GetSerializer(serializerName); exist {
 			serializer = func(ctx context.Context, v any) (any, error) {
