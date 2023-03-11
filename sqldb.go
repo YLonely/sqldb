@@ -3,6 +3,7 @@ package sqldb
 import (
 	"database/sql/driver"
 	"encoding/json"
+	"fmt"
 
 	"github.com/samber/lo"
 	"gorm.io/gorm/clause"
@@ -24,8 +25,8 @@ const (
 
 // OptionInterface wraps basic methods of options.
 type OptionInterface interface {
-	// TargetColumnName returns the name of the column an operation processes against.
-	TargetColumnName() ColumnName
+	// GetTargetColumn returns the name of the column an operation processes against.
+	GetTargetColumn() string
 	// GetValue returns the value the option carries. It is used by the operation to query or update the target column.
 	GetValue() any
 }
@@ -41,8 +42,8 @@ func NewOption[T any, C ColumnType[T]](col C, v T) Option[T] {
 	return Option[T]{Column: (any)(col).(ColumnGetter).GetColumnName(), Value: v}
 }
 
-func (opt Option[T]) TargetColumnName() ColumnName {
-	return opt.Column
+func (opt Option[T]) GetTargetColumn() string {
+	return opt.Column.String()
 }
 
 func (opt Option[T]) GetValue() any {
@@ -51,8 +52,8 @@ func (opt Option[T]) GetValue() any {
 
 // ValuesOptionInterface wraps basic method of options which carry multiple values.
 type ValuesOptionInterface interface {
-	// TargetColumnName returns the name of the column an operation processes against.
-	TargetColumnName() ColumnName
+	// GetTargetColumn returns the name of the column an operation processes against.
+	GetTargetColumn() string
 	// GetValues returns the values the option carries. Those values are used to query data.
 	GetValues() []any
 }
@@ -68,8 +69,8 @@ func NewValuesOption[T comparable, C ColumnType[T]](col C, vs []T) ValuesOption[
 	return ValuesOption[T]{Column: (any)(col).(ColumnGetter).GetColumnName(), Values: vs}
 }
 
-func (opt ValuesOption[T]) TargetColumnName() ColumnName {
-	return opt.Column
+func (opt ValuesOption[T]) GetTargetColumn() string {
+	return opt.Column.String()
 }
 
 func (opt ValuesOption[T]) GetValues() []any {
@@ -201,7 +202,7 @@ const (
 
 // SortOptionInterface represents an sort operation.
 type SortOptionInterface interface {
-	TargetColumnName() ColumnName
+	GetTargetColumn() string
 	SortOrder() SortOrder
 }
 
@@ -219,8 +220,8 @@ func NewSortOption[T comparable, C ColumnType[T]](col C, order SortOrder) SortOp
 	}
 }
 
-func (opt SortOption[T]) TargetColumnName() ColumnName {
-	return opt.Column
+func (opt SortOption[T]) GetTargetColumn() string {
+	return opt.Column.String()
 }
 
 func (opt SortOption[T]) SortOrder() SortOrder {
@@ -237,21 +238,37 @@ type ListOptions struct {
 
 // columnSetter sets the column name of a filed
 type columnSetter interface {
-	setColumnName(name string)
+	setColumnName(table, name string)
 }
 
 type ColumnGetter interface {
 	GetColumnName() ColumnName
 }
 
-type ColumnName string
+type ColumnName struct {
+	table string
+	Name  string
+}
+
+func NewColumnName(name string) ColumnName {
+	return ColumnName{Name: name}
+}
+
+func (cn ColumnName) String() string {
+	return cn.Name
+}
+
+func (cn ColumnName) Full() string {
+	return lo.Ternary(cn.table == "", cn.Name, fmt.Sprintf("%s.%s", cn.table, cn.Name))
+}
 
 func (cn ColumnName) GetColumnName() ColumnName {
 	return cn
 }
 
-func (cn *ColumnName) setColumnName(name string) {
-	*cn = ColumnName(name)
+func (cn *ColumnName) setColumnName(table, name string) {
+	cn.table = table
+	cn.Name = name
 }
 
 type ColumnValue[T any] struct {

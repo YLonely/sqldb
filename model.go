@@ -85,7 +85,7 @@ func NewModel[T any](db *gorm.DB) Model[T] {
 	if err := iterateFields(m, func(fieldAddr reflect.Value, path []reflect.StructField) bool {
 		if setter, ok := fieldAddr.Interface().(columnSetter); ok {
 			name, s := parseColumn(db, path)
-			setter.setColumnName(name)
+			setter.setColumnName("", name)
 			if s != nil {
 				serializers[name] = s
 			}
@@ -152,7 +152,7 @@ func (m model[T]) Update(ctx context.Context, query FilterOptions, opts []Update
 	}
 	updateMap := map[string]any{}
 	for _, opt := range opts {
-		column := string(opt.TargetColumnName())
+		column := opt.GetTargetColumn()
 		v, err := m.serialize(ctx, column, opt.GetValue())
 		if err != nil {
 			return 0, err
@@ -212,7 +212,7 @@ func (m model[T]) List(ctx context.Context, opts ListOptions) (entities []*T, to
 	}
 
 	for _, opt := range opts.SortOptions {
-		db = db.Order(fmt.Sprintf("%s %s", opt.TargetColumnName(), opt.SortOrder()))
+		db = db.Order(fmt.Sprintf("%s %s", opt.GetTargetColumn(), opt.SortOrder()))
 	}
 
 	if err = db.Find(&entities).Error; err != nil {
@@ -261,11 +261,11 @@ func (h *applyHelper) applyOpQueryOptions(ctx context.Context, opts []OpQueryOpt
 		if opt.QueryOp() == "" {
 			panic("Op must be provided in IsQueryOption")
 		}
-		return fmt.Sprintf("%s %s ?", opt.TargetColumnName(), opt.QueryOp())
+		return fmt.Sprintf("%s %s ?", opt.GetTargetColumn(), opt.QueryOp())
 	}), " AND ")
 	h.db = h.db.Map(func(db *gorm.DB) (*gorm.DB, error) {
 		values, err := MapErr(opts, func(opt OpQueryOptionInterface, _ int) (any, error) {
-			return h.serialize(ctx, string(opt.TargetColumnName()), opt.GetValue())
+			return h.serialize(ctx, opt.GetTargetColumn(), opt.GetValue())
 		})
 		if err != nil {
 			return nil, err
@@ -280,12 +280,12 @@ func (h *applyHelper) applyRangeQueryOptions(ctx context.Context, op string, opt
 		return h
 	}
 	query := strings.Join(lo.Map(opts, func(opt RangeQueryOptionInterface, _ int) string {
-		return fmt.Sprintf("%s %s (?)", opt.TargetColumnName(), op)
+		return fmt.Sprintf("%s %s (?)", opt.GetTargetColumn(), op)
 	}), " AND ")
 	h.db = h.db.Map(func(db *gorm.DB) (*gorm.DB, error) {
 		values, err := MapErr(opts, func(opt RangeQueryOptionInterface, _ int) (any, error) {
 			return MapErr(opt.GetValues(), func(v any, _ int) (any, error) {
-				return h.serialize(ctx, string(opt.TargetColumnName()), v)
+				return h.serialize(ctx, opt.GetTargetColumn(), v)
 			})
 		})
 		if err != nil {
@@ -302,7 +302,7 @@ func (h *applyHelper) applyFuzzyQueryOptions(ctx context.Context, opts []FuzzyQu
 	}
 	lo.ForEach(opts, func(opt FuzzyQueryOptionInterface, _ int) {
 		queries := lo.Map(opt.GetValues(), func(_ any, _ int) string {
-			return fmt.Sprintf("%s LIKE ?", opt.TargetColumnName())
+			return fmt.Sprintf("%s LIKE ?", opt.GetTargetColumn())
 		})
 		values := lo.Map(opt.GetValues(), func(v any, _ int) any { return fmt.Sprintf("%%%v%%", v) })
 		h.db = h.db.Map(func(db *gorm.DB) (*gorm.DB, error) {
