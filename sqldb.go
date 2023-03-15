@@ -25,8 +25,8 @@ const (
 
 // OptionInterface wraps basic methods of options.
 type OptionInterface interface {
-	// GetTargetColumn returns the name of the column an operation processes against.
-	GetTargetColumn() string
+	// GetTargetColumn returns the column the operation processes against.
+	GetTargetColumn() ColumnName
 	// GetValue returns the value the option carries. It is used by the operation to query or update the target column.
 	GetValue() any
 }
@@ -42,8 +42,8 @@ func NewOption[T any, C ColumnType[T]](col C, v T) Option[T] {
 	return Option[T]{Column: (any)(col).(ColumnGetter).GetColumnName(), Value: v}
 }
 
-func (opt Option[T]) GetTargetColumn() string {
-	return opt.Column.String()
+func (opt Option[T]) GetTargetColumn() ColumnName {
+	return opt.Column
 }
 
 func (opt Option[T]) GetValue() any {
@@ -52,8 +52,8 @@ func (opt Option[T]) GetValue() any {
 
 // ValuesOptionInterface wraps basic method of options which carry multiple values.
 type ValuesOptionInterface interface {
-	// GetTargetColumn returns the name of the column an operation processes against.
-	GetTargetColumn() string
+	// GetTargetColumn returns the column the operation processes against.
+	GetTargetColumn() ColumnName
 	// GetValues returns the values the option carries. Those values are used to query data.
 	GetValues() []any
 }
@@ -69,8 +69,8 @@ func NewValuesOption[T comparable, C ColumnType[T]](col C, vs []T) ValuesOption[
 	return ValuesOption[T]{Column: (any)(col).(ColumnGetter).GetColumnName(), Values: vs}
 }
 
-func (opt ValuesOption[T]) GetTargetColumn() string {
-	return opt.Column.String()
+func (opt ValuesOption[T]) GetTargetColumn() ColumnName {
+	return opt.Column
 }
 
 func (opt ValuesOption[T]) GetValues() []any {
@@ -202,7 +202,7 @@ const (
 
 // SortOptionInterface represents an sort operation.
 type SortOptionInterface interface {
-	GetTargetColumn() string
+	GetTargetColumn() ColumnName
 	SortOrder() SortOrder
 }
 
@@ -220,8 +220,8 @@ func NewSortOption[T comparable, C ColumnType[T]](col C, order SortOrder) SortOp
 	}
 }
 
-func (opt SortOption[T]) GetTargetColumn() string {
-	return opt.Column.String()
+func (opt SortOption[T]) GetTargetColumn() ColumnName {
+	return opt.Column
 }
 
 func (opt SortOption[T]) SortOrder() SortOrder {
@@ -370,4 +370,71 @@ func NewColumn[T any](v T) Column[T] {
 // ColumnType contains valid column types.
 type ColumnType[T any] interface {
 	Column[T] | PtrColumn[T]
+}
+
+type JoinOptions struct {
+	SelectedColumns []ColumnName
+	Conditions      []OpJoinOptionInterface
+}
+
+func NewJoinOptions(selected []ColumnGetter, conditions []OpJoinOptionInterface) JoinOptions {
+	return JoinOptions{
+		SelectedColumns: lo.Map(selected, func(cg ColumnGetter, _ int) ColumnName { return cg.GetColumnName() }),
+		Conditions:      conditions,
+	}
+}
+
+type OpJoinOptionInterface interface {
+	GetLeftTargetColumn() ColumnName
+	GetRightTargetColumn() ColumnName
+	QueryOp() QueryOp
+}
+
+type OpJoinOption struct {
+	Left, Right ColumnName
+	Op          QueryOp
+}
+
+func (opt OpJoinOption) GetLeftTargetColumn() ColumnName {
+	return opt.Left
+}
+
+func (opt OpJoinOption) GetRightTargetColumn() ColumnName {
+	return opt.Right
+}
+
+func (opt OpJoinOption) QueryOp() QueryOp {
+	return opt.Op
+}
+
+func NewOpJoinOption[T any, C ColumnType[T]](left C, op QueryOp, right C) OpJoinOption {
+	return OpJoinOption{
+		Left:  any(left).(ColumnGetter).GetColumnName(),
+		Right: any(right).(ColumnGetter).GetColumnName(),
+		Op:    op,
+	}
+}
+
+func NewEqualJoinOption[T any, C ColumnType[T]](left, right C) OpJoinOption {
+	return NewOpJoinOption[T](left, OpEq, right)
+}
+
+func NewNotEqualJoinOption[T any, C ColumnType[T]](left, right C) OpJoinOption {
+	return NewOpJoinOption[T](left, OpNe, right)
+}
+
+func NewGreaterJoinOption[T any, C ColumnType[T]](left, right C) OpJoinOption {
+	return NewOpJoinOption[T](left, OpGt, right)
+}
+
+func NewLessJoinOption[T any, C ColumnType[T]](left, right C) OpJoinOption {
+	return NewOpJoinOption[T](left, OpLt, right)
+}
+
+func NewGreaterEqualJoinOption[T any, C ColumnType[T]](left, right C) OpJoinOption {
+	return NewOpJoinOption[T](left, OpGte, right)
+}
+
+func NewLessEqualJoinOption[T any, C ColumnType[T]](left, right C) OpJoinOption {
+	return NewOpJoinOption[T](left, OpLte, right)
 }

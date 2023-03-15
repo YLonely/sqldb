@@ -3,7 +3,9 @@ package sqldb
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
+	"reflect"
 	"testing"
 	"time"
 
@@ -11,7 +13,15 @@ import (
 	"github.com/stretchr/testify/assert"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
+
+type Relation struct {
+	ID       Column[uint64] `gorm:"column:id;primaryKey"`
+	Name     Column[string]
+	UserName Column[string]
+	Age      Column[int]
+}
 
 type User struct {
 	ID        Column[uint64] `gorm:"column:id;primaryKey"`
@@ -49,6 +59,10 @@ var (
 	u2     = NewUser(2, "Jillian B Bennett", 49, "4209 Ingram Street", 75, "Refrigeration Mechanic", "jeremy.spenc@yahoo.com")
 	u3     = NewUser(3, "Sebastian Turner", 30, "Michigan, Billings", 45, "Teacher", "jennie.nichols@facebook.com")
 	u4     = NewUser(4, "Vera Crawford", 29, "4431 Jefferson Street", 100, "Collage student", "jake.andrews@163.com")
+
+	r1 = NewRelation(1, "relation1", "Vera Crawford", 20)
+	r2 = NewRelation(2, "relation2", "William K Turner", 30)
+	r3 = NewRelation(3, "relation3", "Unknown", 40)
 )
 
 func NewUser(id uint64, name string, age int, addr string, weight uint, occupation, email string) *User {
@@ -60,6 +74,15 @@ func NewUser(id uint64, name string, age int, addr string, weight uint, occupati
 		Status:   NewColumn(Status{Occupation: occupation}),
 		Embedded: Embedded{Weight: NewColumn(weight)},
 		Extra:    Extra{Email: NewColumn(email)},
+	}
+}
+
+func NewRelation(id uint64, name, userName string, age int) *Relation {
+	return &Relation{
+		ID:       NewColumn(id),
+		Name:     NewColumn(name),
+		UserName: NewColumn(userName),
+		Age:      NewColumn(age),
 	}
 }
 
@@ -78,7 +101,9 @@ func TestField(t *testing.T) {
 }
 
 func initDB(t *testing.T) (*gorm.DB, func()) {
-	db, err := gorm.Open(sqlite.Open(dbName), &gorm.Config{})
+	db, err := gorm.Open(sqlite.Open(dbName), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Info),
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,9 +111,16 @@ func initDB(t *testing.T) (*gorm.DB, func()) {
 	if err := db.AutoMigrate(User{}); err != nil {
 		t.Fatal(err)
 	}
+	if err := db.AutoMigrate(Relation{}); err != nil {
+		t.Fatal(err)
+	}
 	m := NewModel[User](db)
 	lo.ForEach([]*User{u1, u2, u3, u4}, func(entity *User, _ int) {
 		assert.Nil(t, m.Create(ctx, entity))
+	})
+	r := NewModel[Relation](db)
+	lo.ForEach([]*Relation{r1, r2, r3}, func(entity *Relation, _ int) {
+		assert.Nil(t, r.Create(ctx, entity))
 	})
 	return db, func() {
 		os.Remove(dbName)
@@ -163,7 +195,7 @@ func TestDelete(t *testing.T) {
 			assert.Nil(t, err, "index %d: %v", index, err)
 			left, _, err := m.List(ctx, ListOptions{})
 			assert.Nil(t, err, err)
-			assert.EqualValues(t, c.expect, lo.Map(left, func(item *User, _ int) User { return *item }), "index %d", index)
+			assert.EqualValues(t, c.expect, left, "index %d", index)
 			return errors.New("")
 		})
 	}
@@ -246,7 +278,7 @@ func TestUpdate(t *testing.T) {
 			assert.Equal(t, c.updatedTotal, total)
 			users, _, err := m.List(ctx, ListOptions{})
 			assert.Nil(t, err, err)
-			assert.EqualValues(t, c.expect, lo.Map(users, func(item *User, _ int) User { return *item }))
+			assert.EqualValues(t, c.expect, users)
 			return errors.New("")
 		})
 	}
@@ -365,7 +397,7 @@ func TestList(t *testing.T) {
 			users, total, err := m.List(ctx, c.opts)
 			assert.Nil(t, err, err)
 			assert.Equal(t, c.expectTotal, total, "index %d", index)
-			assert.EqualValues(t, c.expect, lo.Map(users, func(item *User, _ int) User { return *item }), "index %d", index)
+			assert.EqualValues(t, c.expect, users, "index %d", index)
 			return errors.New("")
 		})
 	}
@@ -383,7 +415,7 @@ func TestGet(t *testing.T) {
 		NewEqualOption(m.Columns().Status, Status{Occupation: "Collage student"}),
 	})
 	assert.Nil(t, err)
-	assert.Equal(t, u4, user)
+	assert.Equal(t, *u4, user)
 	_, err = m.Get(ctx, []OpQueryOptionInterface{
 		NewEqualOption(m.Columns().ID, uint64(100)),
 	})
@@ -444,4 +476,214 @@ func TestTransaction(t *testing.T) {
 	_, total, err = m.List(ctx, ListOptions{})
 	assert.Nil(t, err, err)
 	assert.Equal(t, 2, int(total))
+}
+
+func TestRelationUserJoin(t *testing.T) {
+	db, clean := initDB(t)
+	defer clean()
+
+	var (
+		users       = NewModel[User](db)
+		relations   = NewModel[Relation](db)
+		joined      Model[JoinedEntity[Relation, User]]
+		transaction = NewTransactionFunc(db)
+	)
+	for _, c := range []struct {
+		opts     JoinOptions
+		listOpts ListOptions
+		total    uint64
+		expect   []JoinedEntity[Relation, User]
+		leftJoin bool
+	}{
+		{
+			opts: NewJoinOptions(
+				append(users.ColumnNames(), relations.ColumnNames()...),
+				[]OpJoinOptionInterface{
+					NewGreaterJoinOption[int](relations.Columns().Age, users.Columns().Age),
+				},
+			),
+			listOpts: ListOptions{
+				SortOptions: []SortOptionInterface{
+					NewSortOption[uint64](relations.Columns().ID, SortOrderDescending),
+					NewSortOption[uint64](users.Columns().ID, SortOrderAscending),
+				},
+			},
+			total: 4,
+			expect: []JoinedEntity[Relation, User]{
+				{
+					Left:  *r3,
+					Right: *u3,
+				},
+				{
+					Left:  *r3,
+					Right: *u4,
+				},
+				{
+					Left:  *r2,
+					Right: *u4,
+				},
+				{
+					Left: *r1,
+				},
+			},
+			leftJoin: true,
+		},
+		{
+			opts: NewJoinOptions(
+				append(users.ColumnNames(), relations.ColumnNames()...),
+				[]OpJoinOptionInterface{
+					NewEqualJoinOption[string](users.Columns().Name, relations.Columns().UserName),
+				},
+			),
+			total: 3,
+			expect: []JoinedEntity[Relation, User]{
+				{
+					Left:  *r1,
+					Right: *u4,
+				},
+				{
+					Left:  *r2,
+					Right: *u1,
+				},
+				{
+					Left: *r3,
+				},
+			},
+			leftJoin: true,
+		},
+	} {
+		assert.Nil(t, transaction(ctx, func(ctx context.Context) error {
+			if c.leftJoin {
+				joined = LeftJoin(ctx, relations, users, c.opts)
+			} else {
+				joined = Join(ctx, relations, users, c.opts)
+			}
+			results, total, err := joined.List(ctx, c.listOpts)
+			if err != nil {
+				return err
+			}
+			if c.total != total {
+				return fmt.Errorf("total match, expect %d, actual %d", c.total, total)
+			}
+			if !assert.EqualValues(t, c.expect, removeListColumnNames(results)) {
+				return errors.New("elements match")
+			}
+			return nil
+		}))
+	}
+}
+
+func TestUserRelationJoin(t *testing.T) {
+	db, clean := initDB(t)
+	defer clean()
+
+	var (
+		users     = NewModel[User](db)
+		relations = NewModel[Relation](db)
+		joined    Model[JoinedEntity[User, Relation]]
+	)
+	for _, c := range []struct {
+		opts     JoinOptions
+		listOpts ListOptions
+		total    uint64
+		expect   []JoinedEntity[User, Relation]
+		leftJoin bool
+	}{
+		{
+			opts: NewJoinOptions(
+				append(users.ColumnNames(), relations.ColumnNames()...),
+				[]OpJoinOptionInterface{
+					NewEqualJoinOption[string](users.Columns().Name, relations.Columns().UserName),
+				},
+			),
+			total: 2,
+			expect: []JoinedEntity[User, Relation]{
+				{
+					Left:  *u1,
+					Right: *r2,
+				},
+				{
+					Left:  *u4,
+					Right: *r1,
+				},
+			},
+		},
+		{
+			opts: NewJoinOptions(
+				append(users.ColumnNames(), relations.ColumnNames()...),
+				[]OpJoinOptionInterface{
+					NewGreaterJoinOption[int](relations.Columns().Age, users.Columns().Age),
+				},
+			),
+			total: 5,
+			expect: []JoinedEntity[User, Relation]{
+				{
+					Left: *u1,
+				},
+				{
+					Left: *u2,
+				},
+				{
+					Left:  *u3,
+					Right: *r3,
+				},
+				{
+					Left:  *u4,
+					Right: *r2,
+				},
+				{
+					Left:  *u4,
+					Right: *r3,
+				},
+			},
+			leftJoin: true,
+		},
+		{
+			opts: NewJoinOptions(
+				[]ColumnGetter{users.Columns().Name, relations.Columns().UserName},
+				[]OpJoinOptionInterface{
+					NewEqualJoinOption[string](users.Columns().Name, relations.Columns().UserName),
+				},
+			),
+			total: 1,
+			listOpts: ListOptions{
+				FilterOptions: FilterOptions{
+					OpOptions: []OpQueryOptionInterface{
+						NewEqualOption(users.Columns().Age, 46),
+					},
+				},
+			},
+			expect: []JoinedEntity[User, Relation]{
+				{
+					Left:  User{Name: NewColumn("William K Turner")},
+					Right: Relation{UserName: NewColumn("William K Turner")},
+				},
+			},
+		},
+	} {
+		if c.leftJoin {
+			joined = LeftJoin(ctx, users, relations, c.opts)
+		} else {
+			joined = Join(ctx, users, relations, c.opts)
+		}
+		results, total, err := joined.List(ctx, c.listOpts)
+		assert.Nil(t, err)
+		assert.Equal(t, c.total, total)
+		assert.EqualValues(t, c.expect, removeListColumnNames(results))
+	}
+}
+
+func removeColumnNames[T any](v T) T {
+	iterateFields(&v, func(fieldAddr reflect.Value, path []reflect.StructField) (bool, error) {
+		if setter, ok := fieldAddr.Interface().(columnSetter); ok {
+			setter.setColumnName("", "")
+			return false, nil
+		}
+		return true, nil
+	})
+	return v
+}
+
+func removeListColumnNames[T any](vs []T) []T {
+	return lo.Map(vs, func(v T, _ int) T { return removeColumnNames(v) })
 }

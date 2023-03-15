@@ -5,7 +5,7 @@ import (
 	"reflect"
 )
 
-type fieldIterator func(fieldAddr reflect.Value, path []reflect.StructField) bool
+type fieldIterator func(fieldAddr reflect.Value, path []reflect.StructField) (bool, error)
 
 func iterateFields(obj any, fi fieldIterator, path ...reflect.StructField) error {
 	rv := reflect.ValueOf(obj)
@@ -23,7 +23,11 @@ func iterateFields(obj any, fi fieldIterator, path ...reflect.StructField) error
 		}
 		fieldAddr := e.Field(i).Addr()
 		p := append(path, typeField)
-		if fi(fieldAddr, p) {
+		dive, err := fi(fieldAddr, p)
+		if err != nil {
+			return err
+		}
+		if dive {
 			if err := iterateFields(fieldAddr.Interface(), fi, p...); err != nil {
 				return err
 			}
