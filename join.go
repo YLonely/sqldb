@@ -45,14 +45,16 @@ func Join[L, R any](ctx context.Context, left Model[L], right Model[R], opts Joi
 }
 
 func join[L, R any](ctx context.Context, left Model[L], right Model[R],
-	selectedColumns []ColumnName, conditions []OpJoinOptionInterface, leftJoin bool) Model[JoinedEntity[L, R]] {
+	selectedColumns []ColumnNameGetter, conditions []OpOption, leftJoin bool) Model[JoinedEntity[L, R]] {
 	initial := func(db *gorm.DB) *gorm.DB {
-		query := strings.Join(lo.Map(conditions, func(opt OpJoinOptionInterface, _ int) string {
-			return fmt.Sprintf("%s %s %s", opt.GetLeftTargetColumn().Full(), opt.QueryOp(), opt.GetRightTargetColumn().Full())
+		conditions := lo.Map(conditions, func(opt OpOption, _ int) OpJoinOption { return opt.MustLeft() })
+		query := strings.Join(lo.Map(conditions, func(opt OpJoinOption, _ int) string {
+			return fmt.Sprintf("%s %s %s", opt.GetLeftColumnName().Full(), opt.QueryOp(), opt.GetRightColumnName().Full())
 		}), " AND ")
 		join := fmt.Sprintf("%s %s on %s", lo.Ternary(leftJoin, "LEFT JOIN", "INNER JOIN"), right.Table(), query)
 		return db.Model(new(L)).
-			Select(strings.Join(lo.Map(selectedColumns, func(col ColumnName, _ int) string {
+			Select(strings.Join(lo.Map(selectedColumns, func(getter ColumnNameGetter, _ int) string {
+				col := getter.GetColumnName()
 				return fmt.Sprintf("%s AS `%s`", col.Full(), col.Full())
 			}), ",")).
 			Joins(join)

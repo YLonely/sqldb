@@ -58,19 +58,25 @@ type Model[T any] interface {
 	// all fields of type sqldb.Column[U] in the instance are populated with corresponding column name.
 	Columns() T
 	// ColumnNames returns all column names the model has.
-	ColumnNames() []ColumnGetter
+	ColumnNames() []ColumnNameGetter
+	// Create creates an new entity of type T.
 	Create(ctx context.Context, entity *T) error
-	Get(ctx context.Context, opts []OpQueryOptionInterface) (T, error)
+	Query(queries ...FilterOption) Executor[T]
+}
+
+// Executor is an interface wraps operations related to db queries.
+type Executor[T any] interface {
+	Get(ctx context.Context) (T, error)
 	List(ctx context.Context, opts ListOptions) ([]T, uint64, error)
-	Update(ctx context.Context, query FilterOptions, opts []UpdateOptionInterface) (uint64, error)
-	Delete(ctx context.Context, opts FilterOptions) error
+	Update(ctx context.Context, opts ...UpdateOption) (uint64, error)
+	Delete(ctx context.Context) error
 }
 
 // model implements the Model interface.
 type model[T any] struct {
 	columns           *T
 	columnSerializers map[string]serializer
-	fieldPathToColumn map[string]ColumnGetter
+	fieldPathToColumn map[string]ColumnNameGetter
 	tableName         string
 	joined            bool
 	config            modelConfig
@@ -79,6 +85,12 @@ type model[T any] struct {
 }
 
 var _ Model[struct{}] = model[struct{}]{}
+
+type executor[T any] struct {
+	model[T]
+
+	queries []FilterOption
+}
 
 var (
 	serializers = map[string]serializer{
@@ -103,7 +115,7 @@ func NewModel[T any](db *gorm.DB, opts ...ModelOption) Model[T] {
 	var (
 		m                 = new(T)
 		serializers       = map[string]serializer{}
-		fieldPathToColumn = map[string]ColumnGetter{}
+		fieldPathToColumn = map[string]ColumnNameGetter{}
 		tableName         string
 		leftTableName     string
 		rightTableName    string
@@ -139,14 +151,14 @@ func NewModel[T any](db *gorm.DB, opts ...ModelOption) Model[T] {
 			}
 		}
 
-		if setter, ok := fieldInterface.(columnSetter); ok {
+		if setter, ok := fieldInterface.(columnNameSetter); ok {
 			name, s := parseColumn(db, path)
 			if joined {
 				setter.setColumnName("", fmt.Sprintf("%s.%s", table, name))
 			} else {
 				setter.setColumnName(table, name)
 			}
-			cg := fieldInterface.(ColumnGetter)
+			cg := fieldInterface.(ColumnNameGetter)
 			if s != nil {
 				serializers[cg.GetColumnName().String()] = s
 			}
@@ -218,7 +230,7 @@ func (m model[T]) Table() string {
 	return m.tableName
 }
 
-func (m model[T]) ColumnNames() []ColumnGetter {
+func (m model[T]) ColumnNames() []ColumnNameGetter {
 	return lo.Values(m.fieldPathToColumn)
 }
 
@@ -226,20 +238,31 @@ func (m model[T]) Columns() T {
 	return *m.columns
 }
 
-func (m model[T]) Update(ctx context.Context, query FilterOptions, opts []UpdateOptionInterface) (uint64, error) {
+func (m model[T]) Create(ctx context.Context, entity *T) error {
+	return m.DB(ctx).Create(entity).Error
+}
+
+func (m model[T]) Query(queries ...FilterOption) Executor[T] {
+	return executor[T]{
+		model:   m,
+		queries: queries,
+	}
+}
+
+func (e executor[T]) Update(ctx context.Context, opts ...UpdateOption) (uint64, error) {
 	if len(opts) == 0 {
 		return 0, errors.New("empty options")
 	}
 	updateMap := map[string]any{}
 	for _, opt := range opts {
-		column := getColumnName(m.joined, opt)
-		v, err := m.serialize(ctx, column, opt.GetValue())
+		column := getColumnName(e.joined, opt)
+		v, err := e.serialize(ctx, column, opt.GetValue())
 		if err != nil {
 			return 0, err
 		}
 		updateMap[column] = v
 	}
-	h := newApplyHelper(m.DB(ctx), m.joined, m.serialize).applyFilterOptions(ctx, query)
+	h := newApplyHelper(e.DB(ctx), e.joined, e.serialize).applyFilterOptions(ctx, e.queries)
 	if h.Result().IsError() {
 		return 0, h.Result().Error()
 	}
@@ -247,47 +270,40 @@ func (m model[T]) Update(ctx context.Context, query FilterOptions, opts []Update
 	return uint64(updated.RowsAffected), updated.Error
 }
 
-func (m model[T]) Delete(ctx context.Context, opts FilterOptions) error {
-	h := newApplyHelper(m.DB(ctx), m.joined, m.serialize).applyFilterOptions(ctx, opts)
+func (e executor[T]) Delete(ctx context.Context) error {
+	h := newApplyHelper(e.DB(ctx), e.joined, e.serialize).applyFilterOptions(ctx, e.queries)
 	if h.Result().IsError() {
 		return h.Result().Error()
 	}
 	return h.Result().MustGet().Delete(new(T)).Error
 }
 
-func (m model[T]) Get(ctx context.Context, opts []OpQueryOptionInterface) (T, error) {
-	if len(opts) == 0 {
-		return lo.Empty[T](), errors.New("empty options")
-	}
-	h := newApplyHelper(lo.TernaryF(m.joined,
-		func() *gorm.DB { return m.DB(ctx) },
-		func() *gorm.DB { return m.DB(ctx).Model(new(T)) },
-	), m.joined, m.serialize).applyOpQueryOptions(ctx, opts)
+func (e executor[T]) Get(ctx context.Context) (T, error) {
+	h := newApplyHelper(lo.TernaryF(e.joined,
+		func() *gorm.DB { return e.DB(ctx) },
+		func() *gorm.DB { return e.DB(ctx).Model(new(T)) },
+	), e.joined, e.serialize).applyFilterOptions(ctx, e.queries)
 	if h.Result().IsError() {
 		return lo.Empty[T](), h.Result().Error()
 	}
 	db := h.Result().MustGet()
-	if m.joined {
+	if e.joined {
 		var values map[string]any
 		if err := db.Take(&values).Error; err != nil {
 			return lo.Empty[T](), err
 		}
-		return m.scan(ctx, values)
+		return e.scan(ctx, values)
 	}
 	var entity T
 	return entity, db.First(&entity).Error
 }
 
-func (m model[T]) Create(ctx context.Context, entity *T) error {
-	return m.DB(ctx).Create(entity).Error
-}
-
-func (m model[T]) List(ctx context.Context, opts ListOptions) (entities []T, total uint64, err error) {
+func (e executor[T]) List(ctx context.Context, opts ListOptions) (entities []T, total uint64, err error) {
 	var t int64
-	h := newApplyHelper(lo.TernaryF(m.joined,
-		func() *gorm.DB { return m.DB(ctx) },
-		func() *gorm.DB { return m.DB(ctx).Model(new(T)) },
-	), m.joined, m.serialize).applyFilterOptions(ctx, opts.FilterOptions)
+	h := newApplyHelper(lo.TernaryF(e.joined,
+		func() *gorm.DB { return e.DB(ctx) },
+		func() *gorm.DB { return e.DB(ctx).Model(new(T)) },
+	), e.joined, e.serialize).applyFilterOptions(ctx, e.queries)
 	if h.Result().IsError() {
 		err = h.Result().Error()
 		return
@@ -305,16 +321,16 @@ func (m model[T]) List(ctx context.Context, opts ListOptions) (entities []T, tot
 	}
 
 	for _, opt := range opts.SortOptions {
-		db = db.Order(fmt.Sprintf("%s %s", getColumnName(m.joined, opt), opt.SortOrder()))
+		db = db.Order(fmt.Sprintf("%s %s", getColumnName(e.joined, opt), opt.GetSortOrder()))
 	}
 
-	if m.joined {
+	if e.joined {
 		var valuesList []map[string]any
 		if err = db.Find(&valuesList).Error; err != nil {
 			return
 		}
 		entities, err = MapErr(valuesList, func(values map[string]any, _ int) (T, error) {
-			return m.scan(ctx, values)
+			return e.scan(ctx, values)
 		})
 		return
 	}
@@ -322,9 +338,9 @@ func (m model[T]) List(ctx context.Context, opts ListOptions) (entities []T, tot
 	return
 }
 
-func (m model[T]) serialize(ctx context.Context, column string, v any) (any, error) {
+func (e executor[T]) serialize(ctx context.Context, column string, v any) (any, error) {
 	value := v
-	if s, exist := m.columnSerializers[column]; exist {
+	if s, exist := e.columnSerializers[column]; exist {
 		v, err := s.value(ctx, v)
 		if err != nil {
 			return nil, fmt.Errorf("failed to serialize the value of the column %s: %w", column, err)
@@ -334,18 +350,18 @@ func (m model[T]) serialize(ctx context.Context, column string, v any) (any, err
 	return value, nil
 }
 
-func (m model[T]) scan(ctx context.Context, values map[string]any) (T, error) {
-	target := *m.columns
+func (e executor[T]) scan(ctx context.Context, values map[string]any) (T, error) {
+	target := *e.columns
 	if err := iterateFields(&target, func(fieldAddr reflect.Value, path []reflect.StructField) (bool, error) {
 		fieldPath := strings.Join(lo.Map(path, func(sf reflect.StructField, _ int) string { return sf.Name }), ".")
-		if cg, exist := m.fieldPathToColumn[fieldPath]; exist {
+		if cg, exist := e.fieldPathToColumn[fieldPath]; exist {
 			columnName := cg.GetColumnName().String()
 			v := values[columnName]
 			if v == nil {
 				return false, nil
 			}
 			var err error
-			if s, exist := m.columnSerializers[columnName]; exist {
+			if s, exist := e.columnSerializers[columnName]; exist {
 				err = s.scan(ctx, fieldAddr.Interface(), v)
 			} else {
 				err = fieldAddr.Interface().(interface{ Scan(any) error }).Scan(v)
@@ -376,25 +392,25 @@ func (h *applyHelper) Result() mo.Result[*gorm.DB] {
 	return h.db
 }
 
-func (h *applyHelper) applyFilterOptions(ctx context.Context, opts FilterOptions) *applyHelper {
-	return h.applyOpQueryOptions(ctx, opts.OpOptions).
-		applyRangeQueryOptions(ctx, "IN", opts.InOptions).
-		applyRangeQueryOptions(ctx, "NOT IN", opts.NotInOptions).
-		applyFuzzyQueryOptions(ctx, opts.FuzzyOptions)
+func (h *applyHelper) applyFilterOptions(ctx context.Context, opts []FilterOption) *applyHelper {
+	filterOpts := parseFilterOptions(opts)
+	return h.applyOpQueryOptions(ctx, filterOpts.opQueryOptions).
+		applyRangeQueryOptions(ctx, filterOpts.rangeQueryOptions).
+		applyFuzzyQueryOptions(ctx, filterOpts.fuzzyQueryOptions)
 }
 
-func (h *applyHelper) applyOpQueryOptions(ctx context.Context, opts []OpQueryOptionInterface) *applyHelper {
+func (h *applyHelper) applyOpQueryOptions(ctx context.Context, opts []OpQueryOption) *applyHelper {
 	if len(opts) == 0 {
 		return h
 	}
-	query := strings.Join(lo.Map(opts, func(opt OpQueryOptionInterface, _ int) string {
+	query := strings.Join(lo.Map(opts, func(opt OpQueryOption, _ int) string {
 		if opt.QueryOp() == "" {
 			panic("Op must be provided in IsQueryOption")
 		}
 		return fmt.Sprintf("%s %s ?", getColumnName(h.joined, opt), opt.QueryOp())
 	}), " AND ")
 	h.db = h.db.Map(func(db *gorm.DB) (*gorm.DB, error) {
-		values, err := MapErr(opts, func(opt OpQueryOptionInterface, _ int) (any, error) {
+		values, err := MapErr(opts, func(opt OpQueryOption, _ int) (any, error) {
 			return h.serialize(ctx, getColumnName(h.joined, opt), opt.GetValue())
 		})
 		if err != nil {
@@ -405,15 +421,15 @@ func (h *applyHelper) applyOpQueryOptions(ctx context.Context, opts []OpQueryOpt
 	return h
 }
 
-func (h *applyHelper) applyRangeQueryOptions(ctx context.Context, op string, opts []RangeQueryOptionInterface) *applyHelper {
+func (h *applyHelper) applyRangeQueryOptions(ctx context.Context, opts []RangeQueryOption) *applyHelper {
 	if len(opts) == 0 {
 		return h
 	}
-	query := strings.Join(lo.Map(opts, func(opt RangeQueryOptionInterface, _ int) string {
-		return fmt.Sprintf("%s %s (?)", getColumnName(h.joined, opt), op)
+	query := strings.Join(lo.Map(opts, func(opt RangeQueryOption, _ int) string {
+		return fmt.Sprintf("%s %s (?)", getColumnName(h.joined, opt), lo.Ternary(opt.Exclude(), "NOT IN", "IN"))
 	}), " AND ")
 	h.db = h.db.Map(func(db *gorm.DB) (*gorm.DB, error) {
-		values, err := MapErr(opts, func(opt RangeQueryOptionInterface, _ int) (any, error) {
+		values, err := MapErr(opts, func(opt RangeQueryOption, _ int) (any, error) {
 			return MapErr(opt.GetValues(), func(v any, _ int) (any, error) {
 				return h.serialize(ctx, getColumnName(h.joined, opt), v)
 			})
@@ -426,11 +442,11 @@ func (h *applyHelper) applyRangeQueryOptions(ctx context.Context, op string, opt
 	return h
 }
 
-func (h *applyHelper) applyFuzzyQueryOptions(ctx context.Context, opts []FuzzyQueryOptionInterface) *applyHelper {
+func (h *applyHelper) applyFuzzyQueryOptions(ctx context.Context, opts []FuzzyQueryOption) *applyHelper {
 	if len(opts) == 0 {
 		return h
 	}
-	lo.ForEach(opts, func(opt FuzzyQueryOptionInterface, _ int) {
+	lo.ForEach(opts, func(opt FuzzyQueryOption, _ int) {
 		queries := lo.Map(opt.GetValues(), func(_ any, _ int) string {
 			return fmt.Sprintf("%s LIKE ?", getColumnName(h.joined, opt))
 		})
@@ -442,8 +458,31 @@ func (h *applyHelper) applyFuzzyQueryOptions(ctx context.Context, opts []FuzzyQu
 	return h
 }
 
-func getColumnName(joined bool, opt interface{ GetTargetColumn() ColumnName }) string {
-	cn := opt.GetTargetColumn()
+type filterOptions struct {
+	opQueryOptions    []OpQueryOption
+	rangeQueryOptions []RangeQueryOption
+	fuzzyQueryOptions []FuzzyQueryOption
+}
+
+func parseFilterOptions(opts []FilterOption) filterOptions {
+	res := filterOptions{}
+	for _, opt := range opts {
+		switch opt.GetFilterOptionType() {
+		case FilterOptionTypeOpQuery:
+			res.opQueryOptions = append(res.opQueryOptions, opt.(OpOption).MustRight())
+		case FilterOptionTypeRangeQuery:
+			res.rangeQueryOptions = append(res.rangeQueryOptions, any(opt).(RangeQueryOption))
+		case FilterOptionTypeFuzzyQuery:
+			res.fuzzyQueryOptions = append(res.fuzzyQueryOptions, any(opt).(FuzzyQueryOption))
+		default:
+			panic(fmt.Sprintf("Invalid filter option type %s", opt.GetFilterOptionType()))
+		}
+	}
+	return res
+}
+
+func getColumnName(joined bool, opt ColumnNameGetter) string {
+	cn := opt.GetColumnName()
 	return lo.Ternary(joined, cn.Full(), cn.String())
 }
 

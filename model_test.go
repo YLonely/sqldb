@@ -135,81 +135,59 @@ func TestDelete(t *testing.T) {
 	Transaction := NewTransactionFunc(db)
 
 	for index, c := range []struct {
-		opts   FilterOptions
-		expect []User
+		queries []FilterOption
+		expect  []User
 	}{
 		{
-			opts: FilterOptions{
-				OpOptions: []OpQueryOptionInterface{
-					NewEqualOption(m.Columns().Name, "William K Turner"),
-					NewEqualOption(m.Columns().Status, Status{Occupation: "Health Educator"}),
-				},
+			queries: []FilterOption{
+				m.Columns().Name.EQ("William K Turner"),
+				m.Columns().Status.EQ(Status{Occupation: "Health Educator"}),
 			},
 			expect: []User{*u2, *u3, *u4},
 		},
 		{
-			opts: FilterOptions{
-				FuzzyOptions: []FuzzyQueryOptionInterface{
-					NewFuzzyQueryOption(m.Columns().Extra.Email, []string{".com", "yahoo"}),
-					NewFuzzyQueryOption(m.Columns().Address, []string{"Street"}),
-				},
+			queries: []FilterOption{
+				m.Columns().Extra.Email.FuzzyIn([]string{".com", "yahoo"}),
+				m.Columns().Address.FuzzyIn([]string{"Street"}),
 			},
 			expect: []User{*u1, *u3},
 		},
 		{
-			opts: FilterOptions{
-				InOptions: []RangeQueryOptionInterface{
-					NewRangeQueryOption(m.Columns().Weight, []uint{107, 100}),
-				},
+			queries: []FilterOption{
+				m.Columns().Weight.In([]uint{107, 100}),
 			},
 			expect: []User{*u2, *u3},
 		},
 		{
-			opts: FilterOptions{
-				NotInOptions: []RangeQueryOptionInterface{
-					NewRangeQueryOption(m.Columns().Weight, []uint{107, 100}),
-				},
+			queries: []FilterOption{
+				m.Columns().Weight.NotIn([]uint{107, 100}),
 			},
 			expect: []User{*u1, *u4},
 		},
 		{
-			opts: FilterOptions{
-				OpOptions: []OpQueryOptionInterface{
-					NewEqualOption(m.Columns().Extra.Email, "lurline1985@yahoo.com"),
-				},
-				FuzzyOptions: []FuzzyQueryOptionInterface{
-					NewFuzzyQueryOption(m.Columns().Name, []string{"Turner"}),
-				},
-				InOptions: []RangeQueryOptionInterface{
-					NewRangeQueryOption(m.Columns().Weight, []uint{106, 108, 107}),
-				},
-				NotInOptions: []RangeQueryOptionInterface{
-					NewRangeQueryOption(m.Columns().Age, []int{44, 90, 82}),
-				},
+			queries: []FilterOption{
+				m.Columns().Extra.Email.EQ("lurline1985@yahoo.com"),
+				m.Columns().Name.FuzzyIn([]string{"Turner"}),
+				m.Columns().Weight.In([]uint{106, 108, 107}),
+				m.Columns().Age.NotIn([]int{44, 90, 82}),
 			},
 			expect: []User{*u2, *u3, *u4},
 		},
 	} {
 		Transaction(ctx, func(ctx context.Context) error {
-			err := m.Delete(ctx, c.opts)
+			err := m.Query(c.queries...).Delete(ctx)
 			assert.Nil(t, err, "index %d: %v", index, err)
-			left, _, err := m.List(ctx, ListOptions{})
+			left, _, err := m.Query().List(ctx, ListOptions{})
 			assert.Nil(t, err, err)
 			assert.EqualValues(t, c.expect, left, "index %d", index)
 			return errors.New("")
 		})
 	}
 
-	err := m.Delete(ctx, FilterOptions{
-		OpOptions: []OpQueryOptionInterface{
-			NewEqualOption(m.Columns().ID, uint64(4)),
-		},
-	})
+	err := m.Query(m.Columns().ID.EQ(4)).Delete(ctx)
 	assert.Nil(t, err)
 
-	_, err = m.Get(ctx, []OpQueryOptionInterface{
-		NewEqualOption(m.Columns().ID, uint64(4)),
-	})
+	_, err = m.Query(m.Columns().ID.EQ(4)).Get(ctx)
 	assert.ErrorIs(t, err, gorm.ErrRecordNotFound)
 
 	dest := &User{}
@@ -225,21 +203,19 @@ func TestUpdate(t *testing.T) {
 	Transaction := NewTransactionFunc(db)
 
 	for _, c := range []struct {
-		query        FilterOptions
-		opts         []UpdateOptionInterface
+		queries      []FilterOption
+		opts         []UpdateOption
 		expect       []User
 		updatedTotal uint64
 	}{
 		{
-			query: FilterOptions{
-				OpOptions: []OpQueryOptionInterface{
-					NewEqualOption(m.Columns().Name, "William K Turner"),
-				},
+			queries: []FilterOption{
+				m.Columns().Name.EQ("William K Turner"),
 			},
-			opts: []UpdateOptionInterface{
-				NewUpdateOption(m.Columns().Name, ""),
-				NewUpdateOption(m.Columns().Age, 10),
-				NewUpdateOption(m.Columns().Status, Status{Occupation: "test"}),
+			opts: []UpdateOption{
+				m.Columns().Name.Update(""),
+				m.Columns().Age.Update(10),
+				m.Columns().Status.Update(Status{Occupation: "test"}),
 			},
 			expect: []User{func() User {
 				u := *u1
@@ -251,14 +227,12 @@ func TestUpdate(t *testing.T) {
 			updatedTotal: 1,
 		},
 		{
-			query: FilterOptions{
-				FuzzyOptions: []FuzzyQueryOptionInterface{
-					NewFuzzyQueryOption(m.Columns().Extra.Email, []string{".com", "yahoo"}),
-					NewFuzzyQueryOption(m.Columns().Address, []string{"Street"}),
-				},
+			queries: []FilterOption{
+				m.Columns().Extra.Email.FuzzyIn([]string{".com", "yahoo"}),
+				m.Columns().Address.FuzzyIn([]string{"Street"}),
 			},
-			opts: []UpdateOptionInterface{
-				NewUpdateOption(m.Columns().Weight, uint(1000)),
+			opts: []UpdateOption{
+				m.Columns().Weight.Update(1000),
 			},
 			expect: []User{*u1, func() User {
 				u := *u2
@@ -273,10 +247,10 @@ func TestUpdate(t *testing.T) {
 		},
 	} {
 		Transaction(ctx, func(ctx context.Context) error {
-			total, err := m.Update(ctx, c.query, c.opts)
+			total, err := m.Query(c.queries...).Update(ctx, c.opts...)
 			assert.Nil(t, err, err)
 			assert.Equal(t, c.updatedTotal, total)
-			users, _, err := m.List(ctx, ListOptions{})
+			users, _, err := m.Query().List(ctx, ListOptions{})
 			assert.Nil(t, err, err)
 			assert.EqualValues(t, c.expect, users)
 			return errors.New("")
@@ -291,56 +265,47 @@ func TestList(t *testing.T) {
 	Transaction := NewTransactionFunc(db)
 
 	for index, c := range []struct {
+		queries     []FilterOption
 		opts        ListOptions
 		expectTotal uint64
 		expect      []User
 	}{
 		{
-			opts: ListOptions{
-				FilterOptions: FilterOptions{
-					OpOptions: []OpQueryOptionInterface{
-						NewEqualOption(m.Columns().Status, Status{Occupation: "Teacher"}),
-					},
-				},
+			queries: []FilterOption{
+				m.Columns().Status.EQ(Status{Occupation: "Teacher"}),
 			},
 			expectTotal: 1,
 			expect:      []User{*u3},
 		},
 		{
+			queries: []FilterOption{
+				m.Columns().Weight.LT(101),
+			},
 			opts: ListOptions{
-				FilterOptions: FilterOptions{
-					OpOptions: []OpQueryOptionInterface{
-						NewLessOption(m.Columns().Weight, uint(101)),
-					},
-				},
-				SortOptions: []SortOptionInterface{
-					NewSortOption[int](m.Columns().Age, SortOrderAscending),
+				SortOptions: []SortOption{
+					m.Columns().Age.Sort(SortOrderAscending),
 				},
 			},
 			expectTotal: 3,
 			expect:      []User{*u4, *u3, *u2},
 		},
 		{
+			queries: []FilterOption{
+				m.Columns().Weight.LT(101),
+			},
 			opts: ListOptions{
-				FilterOptions: FilterOptions{
-					OpOptions: []OpQueryOptionInterface{
-						NewLessOption(m.Columns().Weight, uint(101)),
-					},
-				},
-				SortOptions: []SortOptionInterface{
-					NewSortOption[int](m.Columns().Age, SortOrderDescending),
+				SortOptions: []SortOption{
+					m.Columns().Age.Sort(SortOrderDescending),
 				},
 			},
 			expectTotal: 3,
 			expect:      []User{*u2, *u3, *u4},
 		},
 		{
+			queries: []FilterOption{
+				m.Columns().Name.NE("William K Turner"),
+			},
 			opts: ListOptions{
-				FilterOptions: FilterOptions{
-					OpOptions: []OpQueryOptionInterface{
-						NewNotEqualOption(m.Columns().Name, "William K Turner"),
-					},
-				},
 				Offset: 0,
 				Limit:  1,
 			},
@@ -348,53 +313,37 @@ func TestList(t *testing.T) {
 			expect:      []User{*u2},
 		},
 		{
-			opts: ListOptions{
-				FilterOptions: FilterOptions{
-					FuzzyOptions: []FuzzyQueryOptionInterface{
-						NewFuzzyQueryOption(m.Columns().Extra.Email, []string{".com", "yahoo"}),
-						NewFuzzyQueryOption(m.Columns().Address, []string{"Street"}),
-					},
-				},
+			queries: []FilterOption{
+				m.Columns().Extra.Email.FuzzyIn([]string{".com", "yahoo"}),
+				m.Columns().Address.FuzzyIn([]string{"Street"}),
 			},
 			expectTotal: 2,
 			expect:      []User{*u2, *u4},
 		},
 		{
+			queries: []FilterOption{
+				m.Columns().Weight.In([]uint{107, 100}),
+			},
 			opts: ListOptions{
-				FilterOptions: FilterOptions{
-					InOptions: []RangeQueryOptionInterface{
-						NewRangeQueryOption(m.Columns().Weight, []uint{107, 100}),
-					},
-				},
 				Offset: 1,
 			},
 			expectTotal: 2,
 			expect:      []User{*u4},
 		},
 		{
-			opts: ListOptions{
-				FilterOptions: FilterOptions{
-					OpOptions: []OpQueryOptionInterface{
-						NewGreaterEqualOption(m.Columns().Age, 46),
-						NewLessOption(m.Columns().Age, 49),
-					},
-					FuzzyOptions: []FuzzyQueryOptionInterface{
-						NewFuzzyQueryOption(m.Columns().Name, []string{"Turner"}),
-					},
-					InOptions: []RangeQueryOptionInterface{
-						NewRangeQueryOption(m.Columns().Weight, []uint{106, 108, 107}),
-					},
-					NotInOptions: []RangeQueryOptionInterface{
-						NewRangeQueryOption(m.Columns().Age, []int{100}),
-					},
-				},
+			queries: []FilterOption{
+				m.Columns().Age.GTE(uint64(46)),
+				m.Columns().Age.LT(49),
+				m.Columns().Name.FuzzyIn([]string{"Turner"}),
+				m.Columns().Weight.In([]uint{106, 108, 107}),
+				m.Columns().Age.NotIn([]int{100}),
 			},
 			expectTotal: 1,
 			expect:      []User{*u1},
 		},
 	} {
 		Transaction(ctx, func(ctx context.Context) error {
-			users, total, err := m.List(ctx, c.opts)
+			users, total, err := m.Query(c.queries...).List(ctx, c.opts)
 			assert.Nil(t, err, err)
 			assert.Equal(t, c.expectTotal, total, "index %d", index)
 			assert.EqualValues(t, c.expect, users, "index %d", index)
@@ -409,16 +358,14 @@ func TestGet(t *testing.T) {
 
 	m := NewModel[User](db)
 
-	user, err := m.Get(ctx, []OpQueryOptionInterface{
-		NewEqualOption(m.Columns().ID, uint64(4)),
-		NewEqualOption(m.Columns().Extra.Email, "jake.andrews@163.com"),
-		NewEqualOption(m.Columns().Status, Status{Occupation: "Collage student"}),
-	})
+	user, err := m.Query(
+		m.Columns().ID.EQ(4),
+		m.Columns().Extra.Email.EQ("jake.andrews@163.com"),
+		m.Columns().Status.EQ(Status{Occupation: "Collage student"}),
+	).Get(ctx)
 	assert.Nil(t, err)
 	assert.Equal(t, *u4, user)
-	_, err = m.Get(ctx, []OpQueryOptionInterface{
-		NewEqualOption(m.Columns().ID, uint64(100)),
-	})
+	_, err = m.Query(m.Columns().ID.EQ(100)).Get(ctx)
 	assert.ErrorIs(t, err, gorm.ErrRecordNotFound, "")
 }
 
@@ -430,50 +377,30 @@ func TestTransaction(t *testing.T) {
 	Transaction := NewTransactionFunc(db)
 
 	err := Transaction(ctx, func(ctx context.Context) error {
-		assert.Nil(t, m.Delete(ctx, FilterOptions{
-			OpOptions: []OpQueryOptionInterface{
-				NewEqualOption(m.Columns().ID, uint64(1)),
-			},
-		}))
-		assert.Nil(t, m.Delete(ctx, FilterOptions{
-			OpOptions: []OpQueryOptionInterface{
-				NewEqualOption(m.Columns().ID, uint64(2)),
-			},
-		}))
+		assert.Nil(t, m.Query(m.Columns().ID.EQ(1)).Delete(ctx))
+		assert.Nil(t, m.Query(m.Columns().ID.EQ(2)).Delete(ctx))
 		_ = Transaction(ctx, func(ctx context.Context) error {
-			assert.Nil(t, m.Delete(ctx, FilterOptions{
-				InOptions: []RangeQueryOptionInterface{
-					NewRangeQueryOption(m.Columns().ID, []uint64{3, 4}),
-				},
-			}))
+			assert.Nil(t, m.Query(m.Columns().ID.In([]uint64{3, 4})).Delete(ctx))
 			return errors.New("")
 		})
 		return errors.New("")
 	})
 	assert.NotNil(t, err)
 
-	_, total, err := m.List(ctx, ListOptions{})
+	_, total, err := m.Query().List(ctx, ListOptions{})
 	assert.Nil(t, err, err)
 	assert.Equal(t, 4, int(total))
 
 	err = Transaction(ctx, func(ctx context.Context) error {
-		assert.Nil(t, m.Delete(ctx, FilterOptions{
-			InOptions: []RangeQueryOptionInterface{
-				NewRangeQueryOption(m.Columns().ID, []uint64{1, 2}),
-			},
-		}))
+		assert.Nil(t, m.Query(m.Columns().ID.In([]uint64{1, 2})).Delete(ctx))
 		_ = Transaction(ctx, func(ctx context.Context) error {
-			m.Delete(ctx, FilterOptions{
-				OpOptions: []OpQueryOptionInterface{
-					NewEqualOption(m.Columns().Weight, uint(100)),
-				},
-			})
+			m.Query(m.Columns().Weight.EQ(100)).Delete(ctx)
 			return errors.New("")
 		})
 		return nil
 	})
 	assert.Nil(t, err)
-	_, total, err = m.List(ctx, ListOptions{})
+	_, total, err = m.Query().List(ctx, ListOptions{})
 	assert.Nil(t, err, err)
 	assert.Equal(t, 2, int(total))
 }
@@ -498,14 +425,12 @@ func TestRelationUserJoin(t *testing.T) {
 		{
 			opts: NewJoinOptions(
 				append(users.ColumnNames(), relations.ColumnNames()...),
-				[]OpJoinOptionInterface{
-					NewGreaterJoinOption[int](relations.Columns().Age, users.Columns().Age),
-				},
+				relations.Columns().Age.GT(users.Columns().Age),
 			),
 			listOpts: ListOptions{
-				SortOptions: []SortOptionInterface{
-					NewSortOption[uint64](relations.Columns().ID, SortOrderDescending),
-					NewSortOption[uint64](users.Columns().ID, SortOrderAscending),
+				SortOptions: []SortOption{
+					relations.Columns().ID.Sort(SortOrderDescending),
+					users.Columns().ID.Sort(SortOrderAscending),
 				},
 			},
 			total: 4,
@@ -531,9 +456,7 @@ func TestRelationUserJoin(t *testing.T) {
 		{
 			opts: NewJoinOptions(
 				append(users.ColumnNames(), relations.ColumnNames()...),
-				[]OpJoinOptionInterface{
-					NewEqualJoinOption[string](users.Columns().Name, relations.Columns().UserName),
-				},
+				users.Columns().Name.EQ(relations.Columns().UserName),
 			),
 			total: 3,
 			expect: []JoinedEntity[Relation, User]{
@@ -558,7 +481,7 @@ func TestRelationUserJoin(t *testing.T) {
 			} else {
 				joined = Join(ctx, relations, users, c.opts)
 			}
-			results, total, err := joined.List(ctx, c.listOpts)
+			results, total, err := joined.Query().List(ctx, c.listOpts)
 			if err != nil {
 				return err
 			}
@@ -584,7 +507,7 @@ func TestUserRelationJoin(t *testing.T) {
 	)
 	for _, c := range []struct {
 		opts     JoinOptions
-		listOpts ListOptions
+		queries  []FilterOption
 		total    uint64
 		expect   []JoinedEntity[User, Relation]
 		leftJoin bool
@@ -592,9 +515,7 @@ func TestUserRelationJoin(t *testing.T) {
 		{
 			opts: NewJoinOptions(
 				append(users.ColumnNames(), relations.ColumnNames()...),
-				[]OpJoinOptionInterface{
-					NewEqualJoinOption[string](users.Columns().Name, relations.Columns().UserName),
-				},
+				users.Columns().Name.EQ(relations.Columns().UserName),
 			),
 			total: 2,
 			expect: []JoinedEntity[User, Relation]{
@@ -611,9 +532,7 @@ func TestUserRelationJoin(t *testing.T) {
 		{
 			opts: NewJoinOptions(
 				append(users.ColumnNames(), relations.ColumnNames()...),
-				[]OpJoinOptionInterface{
-					NewGreaterJoinOption[int](relations.Columns().Age, users.Columns().Age),
-				},
+				relations.Columns().Age.GT(users.Columns().Age),
 			),
 			total: 5,
 			expect: []JoinedEntity[User, Relation]{
@@ -640,18 +559,12 @@ func TestUserRelationJoin(t *testing.T) {
 		},
 		{
 			opts: NewJoinOptions(
-				[]ColumnGetter{users.Columns().Name, relations.Columns().UserName},
-				[]OpJoinOptionInterface{
-					NewEqualJoinOption[string](users.Columns().Name, relations.Columns().UserName),
-				},
+				[]ColumnNameGetter{users.Columns().Name, relations.Columns().UserName},
+				users.Columns().Name.EQ(relations.Columns().UserName),
 			),
 			total: 1,
-			listOpts: ListOptions{
-				FilterOptions: FilterOptions{
-					OpOptions: []OpQueryOptionInterface{
-						NewEqualOption(users.Columns().Age, 46),
-					},
-				},
+			queries: []FilterOption{
+				users.Columns().Age.EQ(46),
 			},
 			expect: []JoinedEntity[User, Relation]{
 				{
@@ -666,7 +579,7 @@ func TestUserRelationJoin(t *testing.T) {
 		} else {
 			joined = Join(ctx, users, relations, c.opts)
 		}
-		results, total, err := joined.List(ctx, c.listOpts)
+		results, total, err := joined.Query(c.queries...).List(ctx, ListOptions{})
 		assert.Nil(t, err)
 		assert.Equal(t, c.total, total)
 		assert.EqualValues(t, c.expect, removeListColumnNames(results))
@@ -675,7 +588,7 @@ func TestUserRelationJoin(t *testing.T) {
 
 func removeColumnNames[T any](v T) T {
 	iterateFields(&v, func(fieldAddr reflect.Value, path []reflect.StructField) (bool, error) {
-		if setter, ok := fieldAddr.Interface().(columnSetter); ok {
+		if setter, ok := fieldAddr.Interface().(columnNameSetter); ok {
 			setter.setColumnName("", "")
 			return false, nil
 		}

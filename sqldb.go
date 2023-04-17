@@ -4,13 +4,27 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 	"fmt"
+	"reflect"
 
 	"github.com/samber/lo"
+	"github.com/samber/mo"
 	"gorm.io/gorm/clause"
 	gormschema "gorm.io/gorm/schema"
 
 	"github.com/YLonely/sqldb/internal/sql"
 )
+
+type FilterOptionType string
+
+const (
+	FilterOptionTypeOpQuery    FilterOptionType = "OpQuery"
+	FilterOptionTypeRangeQuery FilterOptionType = "RangeQuery"
+	FilterOptionTypeFuzzyQuery FilterOptionType = "FuzzyQuery"
+)
+
+type FilterOption interface {
+	GetFilterOptionType() FilterOptionType
+}
 
 type QueryOp string
 
@@ -23,174 +37,225 @@ const (
 	OpLte QueryOp = "<="
 )
 
-// OptionInterface wraps basic methods of options.
-type OptionInterface interface {
-	// GetTargetColumn returns the column the operation processes against.
-	GetTargetColumn() ColumnName
+// Option wraps basic methods of options.
+type Option interface {
+	ColumnNameGetter
 	// GetValue returns the value the option carries. It is used by the operation to query or update the target column.
 	GetValue() any
 }
 
-// Option implements the OptionInterface.
-type Option[T any] struct {
-	Column ColumnName
-	Value  T
+// option implements the Option interface.
+type option[T any] struct {
+	name  ColumnName
+	value T
 }
 
-// NewOption returns an new Option.
-func NewOption[T any, C ColumnType[T]](col C, v T) Option[T] {
-	return Option[T]{Column: (any)(col).(ColumnGetter).GetColumnName(), Value: v}
+func newOption[T any](name ColumnName, value T) option[T] {
+	return option[T]{
+		name:  name,
+		value: value,
+	}
 }
 
-func (opt Option[T]) GetTargetColumn() ColumnName {
-	return opt.Column
+func (opt option[T]) GetColumnName() ColumnName {
+	return opt.name
 }
 
-func (opt Option[T]) GetValue() any {
-	return opt.Value
+func (opt option[T]) GetValue() any {
+	return opt.value
 }
 
-// ValuesOptionInterface wraps basic method of options which carry multiple values.
-type ValuesOptionInterface interface {
-	// GetTargetColumn returns the column the operation processes against.
-	GetTargetColumn() ColumnName
+// ValuesOption wraps basic method of options which carry multiple values.
+type ValuesOption interface {
+	ColumnNameGetter
 	// GetValues returns the values the option carries. Those values are used to query data.
 	GetValues() []any
 }
 
-// ValuesOption implements the ValuesOptionInterface.
-type ValuesOption[T comparable] struct {
-	Column ColumnName
-	Values []T
+// valuesOption implements the ValuesOption interface.
+type valuesOption[T any] struct {
+	name   ColumnName
+	values []T
 }
 
-// NewValuesOption returns a new ValuesOption.
-func NewValuesOption[T comparable, C ColumnType[T]](col C, vs []T) ValuesOption[T] {
-	return ValuesOption[T]{Column: (any)(col).(ColumnGetter).GetColumnName(), Values: vs}
+func newValuesOption[T any](name ColumnName, values []T) valuesOption[T] {
+	return valuesOption[T]{
+		name:   name,
+		values: values,
+	}
 }
 
-func (opt ValuesOption[T]) GetTargetColumn() ColumnName {
-	return opt.Column
+func (opt valuesOption[T]) GetColumnName() ColumnName {
+	return opt.name
 }
 
-func (opt ValuesOption[T]) GetValues() []any {
-	return lo.ToAnySlice(opt.Values)
+func (opt valuesOption[T]) GetValues() []any {
+	return lo.ToAnySlice(opt.values)
 }
 
-// OpQueryOptionInterface represents a query which use the given query operator to search data.
-type OpQueryOptionInterface interface {
-	OptionInterface
+type JoinOptions struct {
+	SelectedColumns []ColumnNameGetter
+	Conditions      []OpOption
+}
+
+func NewJoinOptions(selectedColumns []ColumnNameGetter, conditions ...OpOption) JoinOptions {
+	return JoinOptions{
+		SelectedColumns: selectedColumns,
+		Conditions:      conditions,
+	}
+}
+
+type OpJoinOption interface {
+	GetLeftColumnName() ColumnName
+	GetRightColumnName() ColumnName
 	QueryOp() QueryOp
 }
 
-// OpQueryOption implements the OpQueryOptionInterface.
-type OpQueryOption[T comparable] struct {
-	Option[T]
-	Op QueryOp
-}
-
-// NewOpQueryOption creates an OpQueryOption.
-func NewOpQueryOption[T comparable, C ColumnType[T]](col C, op QueryOp, v T) OpQueryOption[T] {
-	return OpQueryOption[T]{
-		Option: Option[T]{
-			Column: (any)(col).(ColumnGetter).GetColumnName(),
-			Value:  v,
-		},
-		Op: op,
+func newOpJoinOption(left, right ColumnName, op QueryOp) opJoinOption {
+	return opJoinOption{
+		left:  left,
+		right: right,
+		op:    op,
 	}
 }
 
-// NewEqualOption creates an OpQueryOption with operator OpEq.
-func NewEqualOption[T comparable, C ColumnType[T]](col C, v T) OpQueryOption[T] {
-	return NewOpQueryOption(col, OpEq, v)
+type opJoinOption struct {
+	left, right ColumnName
+	op          QueryOp
 }
 
-// NewNotEqualOption creates an OpQueryOption with operator OpNe.
-func NewNotEqualOption[T comparable, C ColumnType[T]](col C, v T) OpQueryOption[T] {
-	return NewOpQueryOption(col, OpNe, v)
+func (opt opJoinOption) GetLeftColumnName() ColumnName {
+	return opt.left
 }
 
-// NewGreaterOption creates an OpQueryOption with operator OpGt.
-func NewGreaterOption[T comparable, C ColumnType[T]](col C, v T) OpQueryOption[T] {
-	return NewOpQueryOption(col, OpGt, v)
+func (opt opJoinOption) GetRightColumnName() ColumnName {
+	return opt.right
 }
 
-// NewLessOption creates an OpQueryOption with operator OpLt.
-func NewLessOption[T comparable, C ColumnType[T]](col C, v T) OpQueryOption[T] {
-	return NewOpQueryOption(col, OpLt, v)
+func (opt opJoinOption) QueryOp() QueryOp {
+	return opt.op
 }
 
-// NewGreaterEqualOption creates an OpQueryOption with operator OpGte.
-func NewGreaterEqualOption[T comparable, C ColumnType[T]](col C, v T) OpQueryOption[T] {
-	return NewOpQueryOption(col, OpGte, v)
+// OpQueryOption represents a query which use the given query operator to search data.
+type OpQueryOption interface {
+	Option
+	QueryOp() QueryOp
 }
 
-// NewLessEqualOption creates an OpQueryOption with operator OpLte.
-func NewLessEqualOption[T comparable, C ColumnType[T]](col C, v T) OpQueryOption[T] {
-	return NewOpQueryOption(col, OpLte, v)
+// opQueryOption implements the OpQueryOption interface.
+type opQueryOption[T any] struct {
+	option[T]
+	op QueryOp
 }
 
-func (opt OpQueryOption[T]) QueryOp() QueryOp {
-	return opt.Op
-}
-
-// RangeQueryOptionInterface represents a query that find data from a given range of values.
-type RangeQueryOptionInterface interface {
-	ValuesOptionInterface
-}
-
-// RangeQueryOption implements the RangeQueryOptionInterface.
-type RangeQueryOption[T comparable] struct {
-	ValuesOption[T]
-}
-
-// NewRangeQueryOption creates a new RangeQueryOption.
-func NewRangeQueryOption[T comparable, C ColumnType[T]](col C, vs []T) RangeQueryOption[T] {
-	return RangeQueryOption[T]{
-		ValuesOption: NewValuesOption(col, vs),
+func newOpQueryOption[T any](name ColumnName, v T, op QueryOp) opQueryOption[T] {
+	return opQueryOption[T]{
+		option: newOption(name, v),
+		op:     op,
 	}
 }
 
-// FuzzyQueryOptionInterface represents a query that find data that match given patterns approximately.
-type FuzzyQueryOptionInterface interface {
-	ValuesOptionInterface
+func (opt opQueryOption[T]) QueryOp() QueryOp {
+	return opt.op
 }
 
-// FuzzyQueryOption implements the FuzzyQueryOptionInterface.
-type FuzzyQueryOption[T comparable] struct {
-	ValuesOption[T]
+func (opt opQueryOption[T]) GetFilterOptionType() FilterOptionType {
+	return FilterOptionTypeOpQuery
 }
 
-// NewFuzzyQueryOption creates a new FuzzyQueryOption.
-func NewFuzzyQueryOption[T comparable, C ColumnType[T]](col C, vs []T) FuzzyQueryOption[T] {
-	return FuzzyQueryOption[T]{
-		ValuesOption: NewValuesOption(col, vs),
+type OpOption struct {
+	mo.Either[OpJoinOption, OpQueryOption]
+}
+
+func newOpOption[T any](v any, op QueryOp, name ColumnName) OpOption {
+	var (
+		rv         = reflect.ValueOf(v)
+		columnType bool
+	)
+	if valuer, ok := v.(interface{ reflectValue() reflect.Value }); ok {
+		rv = valuer.reflectValue()
+		columnType = true
+	}
+	dest := reflect.TypeOf(*new(T))
+	if !rv.CanConvert(dest) {
+		panic(fmt.Sprintf("Value of type %s can not convert to type %s", rv.Type().String(), dest.String()))
+	}
+	if columnType {
+		rightName := v.(ColumnNameGetter).GetColumnName()
+		return OpOption{
+			Either: mo.Left[OpJoinOption, OpQueryOption](newOpJoinOption(name, rightName, op)),
+		}
+	}
+	return OpOption{
+		Either: mo.Right[OpJoinOption, OpQueryOption](newOpQueryOption(name, rv.Convert(dest).Interface().(T), op)),
 	}
 }
 
-// UpdateOptionInterface represents an update operation that updates the target column with given value.
-type UpdateOptionInterface interface {
-	OptionInterface
+func (opt OpOption) GetFilterOptionType() FilterOptionType {
+	return opt.MustRight().(FilterOption).GetFilterOptionType()
 }
 
-// UpdateOption implements the UpdateOptionInterface.
-type UpdateOption[T any] struct {
-	Option[T]
+// RangeQueryOption represents a query that find data from a given range of values.
+type RangeQueryOption interface {
+	ValuesOption
+	Exclude() bool
 }
 
-// NewUpdateOption creates a new UpdateOption.
-func NewUpdateOption[T any, C ColumnType[T]](col C, v T) UpdateOption[T] {
-	return UpdateOption[T]{
-		Option: NewOption(col, v),
+// rangeQueryOption implements the RangeQueryOption interface.
+type rangeQueryOption[T any] struct {
+	valuesOption[T]
+	exclude bool
+}
+
+func newRangeQueryOption[T any](name ColumnName, values []T, exclude bool) rangeQueryOption[T] {
+	return rangeQueryOption[T]{
+		valuesOption: newValuesOption(name, values),
+		exclude:      exclude,
 	}
 }
 
-// FilterOptions contains options that related to data filtering.
-type FilterOptions struct {
-	OpOptions    []OpQueryOptionInterface
-	FuzzyOptions []FuzzyQueryOptionInterface
-	InOptions    []RangeQueryOptionInterface
-	NotInOptions []RangeQueryOptionInterface
+func (opt rangeQueryOption[T]) Exclude() bool {
+	return opt.exclude
+}
+
+func (opt rangeQueryOption[T]) GetFilterOptionType() FilterOptionType {
+	return FilterOptionTypeRangeQuery
+}
+
+// FuzzyQueryOption represents a query that find data that match given patterns approximately.
+type FuzzyQueryOption interface {
+	ValuesOption
+}
+
+// fuzzyQueryOption implements the FuzzyQueryOption.
+type fuzzyQueryOption[T any] struct {
+	valuesOption[T]
+}
+
+func newFuzzyQueryOption[T any](name ColumnName, values []T) fuzzyQueryOption[T] {
+	return fuzzyQueryOption[T]{
+		valuesOption: newValuesOption(name, values),
+	}
+}
+
+func (opt fuzzyQueryOption[T]) GetFilterOptionType() FilterOptionType {
+	return FilterOptionTypeFuzzyQuery
+}
+
+// UpdateOption represents an update operation that updates the target column with given value.
+type UpdateOption interface {
+	Option
+}
+
+// updateOption implements the UpdateOption.
+type updateOption[T any] struct {
+	option[T]
+}
+
+func newUpdateOption[T any](name ColumnName, value T) updateOption[T] {
+	return updateOption[T]{
+		option: newOption(name, value),
+	}
 }
 
 type SortOrder string
@@ -200,54 +265,52 @@ const (
 	SortOrderDescending SortOrder = "desc"
 )
 
-// SortOptionInterface represents an sort operation.
-type SortOptionInterface interface {
-	GetTargetColumn() ColumnName
-	SortOrder() SortOrder
+// SortOption represents an sort operation.
+type SortOption interface {
+	ColumnNameGetter
+	GetSortOrder() SortOrder
 }
 
-// SortOption implements the SortOptionInterface.
-type SortOption[T comparable] struct {
-	Column ColumnName
-	Order  SortOrder
+// sortOption implements the SortOptionInterface.
+type sortOption struct {
+	name  ColumnName
+	order SortOrder
 }
 
-// NewSortOption creates a new SortOption.
-func NewSortOption[T comparable, C ColumnType[T]](col C, order SortOrder) SortOption[T] {
-	return SortOption[T]{
-		Column: (any)(col).(ColumnGetter).GetColumnName(),
-		Order:  order,
-	}
+func (opt sortOption) GetColumnName() ColumnName {
+	return opt.name
 }
 
-func (opt SortOption[T]) GetTargetColumn() ColumnName {
-	return opt.Column
-}
-
-func (opt SortOption[T]) SortOrder() SortOrder {
-	return opt.Order
+func (opt sortOption) GetSortOrder() SortOrder {
+	return opt.order
 }
 
 // ListOptions contains options and parameters that related to data listing.
 type ListOptions struct {
-	FilterOptions
 	Offset      uint64
 	Limit       uint64
-	SortOptions []SortOptionInterface
+	SortOptions []SortOption
 }
 
-// columnSetter sets the column name of a filed
-type columnSetter interface {
+// columnNameSetter sets the column name of a filed
+type columnNameSetter interface {
 	setColumnName(table, name string)
 }
 
-type ColumnGetter interface {
+type ColumnNameGetter interface {
 	GetColumnName() ColumnName
 }
 
 type ColumnName struct {
 	table string
 	Name  string
+}
+
+func (cn ColumnName) Sort(order SortOrder) sortOption {
+	return sortOption{
+		name:  cn,
+		order: order,
+	}
 }
 
 func NewColumnName(name string) ColumnName {
@@ -343,6 +406,50 @@ type PtrColumn[T any] struct {
 	ColumnName
 }
 
+func (c PtrColumn[T]) reflectValue() reflect.Value {
+	return reflect.ValueOf(*new(T))
+}
+
+func (c PtrColumn[T]) EQ(value any) OpOption {
+	return newOpOption[T](value, OpEq, c.ColumnName)
+}
+
+func (c PtrColumn[T]) NE(value any) OpOption {
+	return newOpOption[T](value, OpNe, c.ColumnName)
+}
+
+func (c PtrColumn[T]) GT(value any) OpOption {
+	return newOpOption[T](value, OpGt, c.ColumnName)
+}
+
+func (c PtrColumn[T]) LT(value any) OpOption {
+	return newOpOption[T](value, OpLt, c.ColumnName)
+}
+
+func (c PtrColumn[T]) GTE(value any) OpOption {
+	return newOpOption[T](value, OpGte, c.ColumnName)
+}
+
+func (c PtrColumn[T]) LTE(value any) OpOption {
+	return newOpOption[T](value, OpLte, c.ColumnName)
+}
+
+func (c PtrColumn[T]) In(values []T) rangeQueryOption[T] {
+	return newRangeQueryOption(c.ColumnName, values, false)
+}
+
+func (c PtrColumn[T]) NotIn(values []T) rangeQueryOption[T] {
+	return newRangeQueryOption(c.ColumnName, values, true)
+}
+
+func (c PtrColumn[T]) FuzzyIn(values []T) fuzzyQueryOption[T] {
+	return newFuzzyQueryOption(c.ColumnName, values)
+}
+
+func (c PtrColumn[T]) Update(value T) updateOption[T] {
+	return newUpdateOption(c.ColumnName, value)
+}
+
 // NewPtrColumn creates a new PtrColumn of type T.
 func NewPtrColumn[T any](v T) PtrColumn[T] {
 	return PtrColumn[T]{
@@ -358,6 +465,50 @@ type Column[T any] struct {
 	ColumnName
 }
 
+func (c Column[T]) reflectValue() reflect.Value {
+	return reflect.ValueOf(*new(T))
+}
+
+func (c Column[T]) EQ(value any) OpOption {
+	return newOpOption[T](value, OpEq, c.ColumnName)
+}
+
+func (c Column[T]) NE(value any) OpOption {
+	return newOpOption[T](value, OpNe, c.ColumnName)
+}
+
+func (c Column[T]) GT(value any) OpOption {
+	return newOpOption[T](value, OpGt, c.ColumnName)
+}
+
+func (c Column[T]) LT(value any) OpOption {
+	return newOpOption[T](value, OpLt, c.ColumnName)
+}
+
+func (c Column[T]) GTE(value any) OpOption {
+	return newOpOption[T](value, OpGte, c.ColumnName)
+}
+
+func (c Column[T]) LTE(value any) OpOption {
+	return newOpOption[T](value, OpLte, c.ColumnName)
+}
+
+func (c Column[T]) In(values []T) rangeQueryOption[T] {
+	return newRangeQueryOption(c.ColumnName, values, false)
+}
+
+func (c Column[T]) NotIn(values []T) rangeQueryOption[T] {
+	return newRangeQueryOption(c.ColumnName, values, true)
+}
+
+func (c Column[T]) FuzzyIn(values []T) fuzzyQueryOption[T] {
+	return newFuzzyQueryOption(c.ColumnName, values)
+}
+
+func (c Column[T]) Update(value T) updateOption[T] {
+	return newUpdateOption(c.ColumnName, value)
+}
+
 // NewColumn creates a new Column of type T.
 func NewColumn[T any](v T) Column[T] {
 	return Column[T]{
@@ -365,76 +516,4 @@ func NewColumn[T any](v T) Column[T] {
 			V: v,
 		},
 	}
-}
-
-// ColumnType contains valid column types.
-type ColumnType[T any] interface {
-	Column[T] | PtrColumn[T]
-}
-
-type JoinOptions struct {
-	SelectedColumns []ColumnName
-	Conditions      []OpJoinOptionInterface
-}
-
-func NewJoinOptions(selected []ColumnGetter, conditions []OpJoinOptionInterface) JoinOptions {
-	return JoinOptions{
-		SelectedColumns: lo.Map(selected, func(cg ColumnGetter, _ int) ColumnName { return cg.GetColumnName() }),
-		Conditions:      conditions,
-	}
-}
-
-type OpJoinOptionInterface interface {
-	GetLeftTargetColumn() ColumnName
-	GetRightTargetColumn() ColumnName
-	QueryOp() QueryOp
-}
-
-type OpJoinOption struct {
-	Left, Right ColumnName
-	Op          QueryOp
-}
-
-func (opt OpJoinOption) GetLeftTargetColumn() ColumnName {
-	return opt.Left
-}
-
-func (opt OpJoinOption) GetRightTargetColumn() ColumnName {
-	return opt.Right
-}
-
-func (opt OpJoinOption) QueryOp() QueryOp {
-	return opt.Op
-}
-
-func NewOpJoinOption[T any, C ColumnType[T]](left C, op QueryOp, right C) OpJoinOption {
-	return OpJoinOption{
-		Left:  any(left).(ColumnGetter).GetColumnName(),
-		Right: any(right).(ColumnGetter).GetColumnName(),
-		Op:    op,
-	}
-}
-
-func NewEqualJoinOption[T any, C ColumnType[T]](left, right C) OpJoinOption {
-	return NewOpJoinOption[T](left, OpEq, right)
-}
-
-func NewNotEqualJoinOption[T any, C ColumnType[T]](left, right C) OpJoinOption {
-	return NewOpJoinOption[T](left, OpNe, right)
-}
-
-func NewGreaterJoinOption[T any, C ColumnType[T]](left, right C) OpJoinOption {
-	return NewOpJoinOption[T](left, OpGt, right)
-}
-
-func NewLessJoinOption[T any, C ColumnType[T]](left, right C) OpJoinOption {
-	return NewOpJoinOption[T](left, OpLt, right)
-}
-
-func NewGreaterEqualJoinOption[T any, C ColumnType[T]](left, right C) OpJoinOption {
-	return NewOpJoinOption[T](left, OpGte, right)
-}
-
-func NewLessEqualJoinOption[T any, C ColumnType[T]](left, right C) OpJoinOption {
-	return NewOpJoinOption[T](left, OpLte, right)
 }
