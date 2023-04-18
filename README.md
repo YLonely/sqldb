@@ -10,8 +10,9 @@ It also provides an implementation of the interfaces based on the [GORM](https:/
 # Getting Started
 
 ## The Model interface
-The `Model` defined in `model.go` contains a set of commonly used methods when handling data in a database.
+The `Model` and `Executor` defined in `model.go` contains a set of commonly used methods when handling data in a database.
 ```golang
+// Model is an interface defines commonly used methods to manipulate data.
 type Model[T any] interface {
 	// DB returns the db instance.
 	DB(context.Context) *gorm.DB
@@ -21,13 +22,18 @@ type Model[T any] interface {
 	// all fields of type sqldb.Column[U] in the instance are populated with corresponding column name.
 	Columns() T
 	// ColumnNames returns all column names the model has.
-	ColumnNames() []ColumnGetter
-
+	ColumnNames() []ColumnNameGetter
+	// Create creates an new entity of type T.
 	Create(ctx context.Context, entity *T) error
-	Get(ctx context.Context, opts []OpQueryOptionInterface) (T, error)
+	Query(queries ...FilterOption) Executor[T]
+}
+
+// Executor is an interface wraps operations related to db queries.
+type Executor[T any] interface {
+	Get(ctx context.Context) (T, error)
 	List(ctx context.Context, opts ListOptions) ([]T, uint64, error)
-	Update(ctx context.Context, query FilterOptions, opts []UpdateOptionInterface) (uint64, error)
-	Delete(ctx context.Context, opts FilterOptions) error
+	Update(ctx context.Context, opts ...UpdateOption) (uint64, error)
+	Delete(ctx context.Context) error
 }
 ```
 ## Declaring models
@@ -66,34 +72,62 @@ func main(){
 		panic(err)
 	}
 
-	Users := sqldb.NewModel[User](db)
+	if err := db.AutoMigrate(User{}); err != nil {
+		panic(err)
+	}
+	m := sqldb.NewModel[User](db)
+	cols := m.Columns()
 	ctx := context.Background()
 
-	// To create a new user
-	age := 10
 	u := &User{
-		Name: sqldb.NewColumn("test"),
-		Age: sqldb.NewPtrColumn(age),
+		ID:   sqldb.NewColumn(uint64(1)),
+		Name: sqldb.NewColumn("lazy"),
+		Age:  sqldb.NewPtrColumn(10),
 	}
-	_ = Users.Create(ctx, u)
+	if err := m.Create(ctx, u); err != nil {
+		panic(err)
+	}
 
-	// To get the user
-	u, err := Users.Get(ctx, []sqldb.OpQueryOptionInterface{
-		// No more string literals, use .Columns() instead.
-		sqldb.NewEqualOption(Users.Columns().Name, "test"),
-		// Not recommended.
-		sqldb.OpQueryOption[string]{
-			Op: sqldb.OpEq,
-			Option: sqldb.Option[string]{
-				Column: sqldb.NewColumnName("user_name"),
-				Value: "test",
-			},
-		},
-	})
+	u.ID.V = 2
+	u.Name.V = "jump"
+	if err := m.Create(ctx, u); err != nil {
+		panic(err)
+	}
+
+	users, _, err := m.Query(
+		cols.Name.NE("lazy"),
+		cols.Age.In([]int{10, 11, 12}),
+		// not recommended
+		sqldb.NewOpQueryOption(
+			sqldb.NewColumnName("user_name"),
+			sqldb.OpEq,
+			"jump",
+		),
+	).List(ctx, sqldb.ListOptions{})
+	if err != nil {
+		panic(err)
+	}
+	for _, u := range users {
+		fmt.Printf("id: %v\tname: %s\tage: %v\n",
+			u.ID.V, u.Name.V, *u.Age.V)
+	}
 }
 ```
 
-It is worth noting that you do not write string literals of columns when constructing query options, every `Model[T]` type has a method `Columns()` which returns a instance of type T, all fields of type `sqldb.Column` in type T are populated with column name during initialization. You can also use the option structs directly, but you have to confirm the column name by yourself, which is extremely not recommended.
+It is worth noting that you do not write string literals of columns when constructing query options, every `Model[T]` type has a method `Columns()` which returns a instance of type T, all fields of type `sqldb.Column` or `sqldb.PtrColumn` in type T provide a bunch of useful methods for users to construct query options. 
+```golang
+func EQ(value any) OpOption {}
+func NE(value any) OpOption {}
+func GT(value any) OpOption {}
+func LT(value any) OpOption {}
+func GTE(value any) OpOption {}
+func LTE(value any) OpOption {}
+func In(values []T) RangeQueryOption {}
+func NotIn(values []T) RangeQueryOption {}
+func FuzzyIn(values []T) FuzzyQueryOption {}
+func Update(value any) UpdateOption {}
+```
+You can also use the option structs directly, but you have to confirm the column name by yourself, which is extremely not recommended.
 
 ## Transactions
 `sqldb.go` also defines a function type which abstracts transactions:
@@ -106,11 +140,7 @@ To create a `TransactionFunc` implemented by GORM and process models in the tran
 Transaction := sqldb.NewTransactionFunc(db)
 
 Transaction(context.Background(), func(ctx context.Context) error {
-	if err := Users.Delete(ctx, sqldb.FilterOptions{
-		InOptions: []sqldb.RangeQueryOptionInterface{
-			sqldb.NewRangeQueryOption(Users.Age, []int{10, 11, 12}),
-		}
-	}); err != nil {
+	if err := Users.Query(Users.Columns().Age.In([]int{10, 11, 12})).Delete(ctx); err != nil {
 		return err
 	}
 
@@ -131,14 +161,14 @@ import (
 )
 
 type User struct {
-	Name string	
-	Age  int
+	Name sqldb.Column[string]
+	Age  sqldb.Column[int]
 }
 
 type Class struct {
-	Name    string
-	Address string
-	Age     int
+	Name    sqldb.Column[string]
+	Address sqldb.Column[string]
+	Age     sqldb.Column[int]
 }
 
 func main(){
@@ -150,11 +180,9 @@ func main(){
 	results, total, err := Join(ctx, users, classes, 
 		NewJoinOptions(
 			append(users.ColumnNames(), classes.ColumnNames()...),
-			[]OpJoinOptionInterface{
-				NewEqualJoinOption[string](users.Columns().Name, classes.Columns().Name),
-			},
+			users.Columns().Name.EQ(classes.Columns().Name),
 		),
-	).List(ctx, sqldb.ListOptions{})
+	).Query().List(ctx, sqldb.ListOptions{})
 
 	for _, result := range results {
 		fmt.Printf("user.name: %s, class.name: %s\n", result.Left.Name, result.Right.Name)
