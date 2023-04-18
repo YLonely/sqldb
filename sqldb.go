@@ -111,11 +111,13 @@ type OpJoinOption interface {
 	QueryOp() QueryOp
 }
 
-func newOpJoinOption(left, right ColumnName, op QueryOp) opJoinOption {
-	return opJoinOption{
-		left:  left,
-		right: right,
-		op:    op,
+func NewOpJoinOption(left ColumnName, op QueryOp, right ColumnName) OpOption {
+	return OpOption{
+		Either: mo.Left[OpJoinOption, OpQueryOption](opJoinOption{
+			left:  left,
+			right: right,
+			op:    op,
+		}),
 	}
 }
 
@@ -149,10 +151,13 @@ type opQueryOption[T any] struct {
 	op QueryOp
 }
 
-func newOpQueryOption[T any](name ColumnName, v T, op QueryOp) opQueryOption[T] {
-	return opQueryOption[T]{
-		option: newOption(name, v),
-		op:     op,
+func NewOpQueryOption[T any](name ColumnName, op QueryOp, v T) OpOption {
+	return OpOption{
+		Either: mo.Right[OpJoinOption, OpQueryOption](
+			opQueryOption[T]{
+				option: newOption(name, v),
+				op:     op,
+			}),
 	}
 }
 
@@ -162,6 +167,14 @@ func (opt opQueryOption[T]) QueryOp() QueryOp {
 
 func (opt opQueryOption[T]) GetFilterOptionType() FilterOptionType {
 	return FilterOptionTypeOpQuery
+}
+
+type OpOption struct {
+	mo.Either[OpJoinOption, OpQueryOption]
+}
+
+func (opt OpOption) GetFilterOptionType() FilterOptionType {
+	return opt.MustRight().(FilterOption).GetFilterOptionType()
 }
 
 // RangeQueryOption represents a query that find data from a given range of values.
@@ -177,7 +190,7 @@ type rangeQueryOption[T any] struct {
 	exclude bool
 }
 
-func newRangeQueryOption[T any](name ColumnName, values []T, exclude bool) rangeQueryOption[T] {
+func NewRangeQueryOption[T any](name ColumnName, values []T, exclude bool) RangeQueryOption {
 	return rangeQueryOption[T]{
 		valuesOption: newValuesOption(name, values),
 		exclude:      exclude,
@@ -203,7 +216,7 @@ type fuzzyQueryOption[T any] struct {
 	valuesOption[T]
 }
 
-func newFuzzyQueryOption[T any](name ColumnName, values []T) fuzzyQueryOption[T] {
+func NewFuzzyQueryOption[T any](name ColumnName, values []T) FuzzyQueryOption {
 	return fuzzyQueryOption[T]{
 		valuesOption: newValuesOption(name, values),
 	}
@@ -223,7 +236,7 @@ type updateOption[T any] struct {
 	option[T]
 }
 
-func newUpdateOption[T any](name ColumnName, value T) updateOption[T] {
+func NewUpdateOption[T any](name ColumnName, value T) UpdateOption {
 	return updateOption[T]{
 		option: newOption(name, value),
 	}
@@ -240,6 +253,13 @@ const (
 type SortOption interface {
 	ColumnNameGetter
 	GetSortOrder() SortOrder
+}
+
+func NewSortOption(name ColumnName, order SortOrder) SortOption {
+	return sortOption{
+		name:  name,
+		order: order,
+	}
 }
 
 // sortOption implements the SortOptionInterface.
@@ -303,14 +323,6 @@ func (cn ColumnName) GetColumnName() ColumnName {
 func (cn *ColumnName) setColumnName(table, name string) {
 	cn.table = table
 	cn.Name = name
-}
-
-type OpOption struct {
-	mo.Either[OpJoinOption, OpQueryOption]
-}
-
-func (opt OpOption) GetFilterOptionType() FilterOptionType {
-	return opt.MustRight().(FilterOption).GetFilterOptionType()
 }
 
 type ColumnValue[T any] struct {
@@ -406,13 +418,9 @@ func (c columnBase[T]) buildOpOption(value any, op QueryOp) (OpOption, error) {
 		return OpOption{}, fmt.Errorf("failed to build query options for the column %s: %w", c.ColumnName, err)
 	}
 	if getter, ok := value.(ColumnNameGetter); ok {
-		return OpOption{
-			Either: mo.Left[OpJoinOption, OpQueryOption](newOpJoinOption(c.ColumnName, getter.GetColumnName(), op)),
-		}, nil
+		return NewOpJoinOption(c.ColumnName, op, getter.GetColumnName()), nil
 	}
-	return OpOption{
-		Either: mo.Right[OpJoinOption, OpQueryOption](newOpQueryOption(c.ColumnName, v, op)),
-	}, nil
+	return NewOpQueryOption(c.ColumnName, op, v), nil
 }
 
 func (c columnBase[T]) EQ(value any) OpOption {
@@ -440,19 +448,19 @@ func (c columnBase[T]) LTE(value any) OpOption {
 }
 
 func (c columnBase[T]) In(values []T) RangeQueryOption {
-	return newRangeQueryOption(c.ColumnName, values, false)
+	return NewRangeQueryOption(c.ColumnName, values, false)
 }
 
 func (c columnBase[T]) NotIn(values []T) RangeQueryOption {
-	return newRangeQueryOption(c.ColumnName, values, true)
+	return NewRangeQueryOption(c.ColumnName, values, true)
 }
 
 func (c columnBase[T]) FuzzyIn(values []T) FuzzyQueryOption {
-	return newFuzzyQueryOption(c.ColumnName, values)
+	return NewFuzzyQueryOption(c.ColumnName, values)
 }
 
 func (c columnBase[T]) Update(value any) UpdateOption {
-	return newUpdateOption(c.ColumnName, lo.Must(c.convertFrom(value)))
+	return NewUpdateOption(c.ColumnName, lo.Must(c.convertFrom(value)))
 }
 
 /*
@@ -484,15 +492,15 @@ func NewPtrColumn[T any](v T) PtrColumn[T] {
 }
 
 func (c PtrColumn[T]) In(values []T) RangeQueryOption {
-	return newRangeQueryOption(c.ColumnName, values, false)
+	return NewRangeQueryOption(c.ColumnName, values, false)
 }
 
 func (c PtrColumn[T]) NotIn(values []T) RangeQueryOption {
-	return newRangeQueryOption(c.ColumnName, values, true)
+	return NewRangeQueryOption(c.ColumnName, values, true)
 }
 
 func (c PtrColumn[T]) FuzzyIn(values []T) FuzzyQueryOption {
-	return newFuzzyQueryOption(c.ColumnName, values)
+	return NewFuzzyQueryOption(c.ColumnName, values)
 }
 
 // Column represents a column of a table.
