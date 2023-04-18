@@ -139,6 +139,7 @@ func (opt opJoinOption) QueryOp() QueryOp {
 // OpQueryOption represents a query which use the given query operator to search data.
 type OpQueryOption interface {
 	Option
+	FilterOption
 	QueryOp() QueryOp
 }
 
@@ -163,41 +164,10 @@ func (opt opQueryOption[T]) GetFilterOptionType() FilterOptionType {
 	return FilterOptionTypeOpQuery
 }
 
-type OpOption struct {
-	mo.Either[OpJoinOption, OpQueryOption]
-}
-
-func newOpOption[T any](v any, op QueryOp, name ColumnName) OpOption {
-	var (
-		rv         = reflect.ValueOf(v)
-		columnType bool
-	)
-	if valuer, ok := v.(interface{ reflectValue() reflect.Value }); ok {
-		rv = valuer.reflectValue()
-		columnType = true
-	}
-	dest := reflect.TypeOf(*new(T))
-	if !rv.CanConvert(dest) {
-		panic(fmt.Sprintf("Value of type %s can not convert to type %s", rv.Type().String(), dest.String()))
-	}
-	if columnType {
-		rightName := v.(ColumnNameGetter).GetColumnName()
-		return OpOption{
-			Either: mo.Left[OpJoinOption, OpQueryOption](newOpJoinOption(name, rightName, op)),
-		}
-	}
-	return OpOption{
-		Either: mo.Right[OpJoinOption, OpQueryOption](newOpQueryOption(name, rv.Convert(dest).Interface().(T), op)),
-	}
-}
-
-func (opt OpOption) GetFilterOptionType() FilterOptionType {
-	return opt.MustRight().(FilterOption).GetFilterOptionType()
-}
-
 // RangeQueryOption represents a query that find data from a given range of values.
 type RangeQueryOption interface {
 	ValuesOption
+	FilterOption
 	Exclude() bool
 }
 
@@ -224,6 +194,7 @@ func (opt rangeQueryOption[T]) GetFilterOptionType() FilterOptionType {
 
 // FuzzyQueryOption represents a query that find data that match given patterns approximately.
 type FuzzyQueryOption interface {
+	FilterOption
 	ValuesOption
 }
 
@@ -334,8 +305,44 @@ func (cn *ColumnName) setColumnName(table, name string) {
 	cn.Name = name
 }
 
+type OpOption struct {
+	mo.Either[OpJoinOption, OpQueryOption]
+}
+
+func (opt OpOption) GetFilterOptionType() FilterOptionType {
+	return opt.MustRight().(FilterOption).GetFilterOptionType()
+}
+
 type ColumnValue[T any] struct {
 	V T
+}
+
+func (cv ColumnValue[T]) reflectType() reflect.Type {
+	return cv.reflectValue().Type()
+}
+
+func (cv ColumnValue[T]) reflectValue() reflect.Value {
+	rv := reflect.ValueOf(*new(T))
+	if rv.Kind() == reflect.Ptr {
+		return reflect.ValueOf(*new(*T))
+	}
+	return rv
+}
+
+func (cv ColumnValue[T]) convertFrom(v any) (res T, err error) {
+	var (
+		rt  = cv.reflectType()
+		rrv = reflect.ValueOf(v)
+	)
+	if valuer, ok := v.(interface{ reflectValue() reflect.Value }); ok {
+		rrv = valuer.reflectValue()
+	}
+	if !rrv.CanConvert(rt) {
+		err = fmt.Errorf("unable to convert value of type %s to the column type %s", rrv.Type(), rt)
+		return
+	}
+	res = rrv.Convert(rt).Interface().(T)
+	return
 }
 
 func (cv ColumnValue[T]) MarshalJSON() ([]byte, error) {
@@ -388,6 +395,66 @@ func (cv ColumnValue[T]) DeleteClauses(f *gormschema.Field) []clause.Interface {
 	return nil
 }
 
+type columnBase[T any] struct {
+	ColumnValue[T]
+	ColumnName
+}
+
+func (c columnBase[T]) buildOpOption(value any, op QueryOp) (OpOption, error) {
+	v, err := c.convertFrom(value)
+	if err != nil {
+		return OpOption{}, fmt.Errorf("failed to build query options for the column %s: %w", c.ColumnName, err)
+	}
+	if getter, ok := value.(ColumnNameGetter); ok {
+		return OpOption{
+			Either: mo.Left[OpJoinOption, OpQueryOption](newOpJoinOption(c.ColumnName, getter.GetColumnName(), op)),
+		}, nil
+	}
+	return OpOption{
+		Either: mo.Right[OpJoinOption, OpQueryOption](newOpQueryOption(c.ColumnName, v, op)),
+	}, nil
+}
+
+func (c columnBase[T]) EQ(value any) OpOption {
+	return lo.Must(c.buildOpOption(value, OpEq))
+}
+
+func (c columnBase[T]) NE(value any) OpOption {
+	return lo.Must(c.buildOpOption(value, OpNe))
+}
+
+func (c columnBase[T]) GT(value any) OpOption {
+	return lo.Must(c.buildOpOption(value, OpGt))
+}
+
+func (c columnBase[T]) LT(value any) OpOption {
+	return lo.Must(c.buildOpOption(value, OpLt))
+}
+
+func (c columnBase[T]) GTE(value any) OpOption {
+	return lo.Must(c.buildOpOption(value, OpGte))
+}
+
+func (c columnBase[T]) LTE(value any) OpOption {
+	return lo.Must(c.buildOpOption(value, OpLte))
+}
+
+func (c columnBase[T]) In(values []T) RangeQueryOption {
+	return newRangeQueryOption(c.ColumnName, values, false)
+}
+
+func (c columnBase[T]) NotIn(values []T) RangeQueryOption {
+	return newRangeQueryOption(c.ColumnName, values, true)
+}
+
+func (c columnBase[T]) FuzzyIn(values []T) FuzzyQueryOption {
+	return newFuzzyQueryOption(c.ColumnName, values)
+}
+
+func (c columnBase[T]) Update(value any) UpdateOption {
+	return newUpdateOption(c.ColumnName, lo.Must(c.convertFrom(value)))
+}
+
 /*
 PtrColumn is used when declaring models with pointer fields, for example:
 
@@ -402,118 +469,44 @@ equals to
 	}
 */
 type PtrColumn[T any] struct {
-	ColumnValue[*T]
-	ColumnName
-}
-
-func (c PtrColumn[T]) reflectValue() reflect.Value {
-	return reflect.ValueOf(*new(T))
-}
-
-func (c PtrColumn[T]) EQ(value any) OpOption {
-	return newOpOption[T](value, OpEq, c.ColumnName)
-}
-
-func (c PtrColumn[T]) NE(value any) OpOption {
-	return newOpOption[T](value, OpNe, c.ColumnName)
-}
-
-func (c PtrColumn[T]) GT(value any) OpOption {
-	return newOpOption[T](value, OpGt, c.ColumnName)
-}
-
-func (c PtrColumn[T]) LT(value any) OpOption {
-	return newOpOption[T](value, OpLt, c.ColumnName)
-}
-
-func (c PtrColumn[T]) GTE(value any) OpOption {
-	return newOpOption[T](value, OpGte, c.ColumnName)
-}
-
-func (c PtrColumn[T]) LTE(value any) OpOption {
-	return newOpOption[T](value, OpLte, c.ColumnName)
-}
-
-func (c PtrColumn[T]) In(values []T) rangeQueryOption[T] {
-	return newRangeQueryOption(c.ColumnName, values, false)
-}
-
-func (c PtrColumn[T]) NotIn(values []T) rangeQueryOption[T] {
-	return newRangeQueryOption(c.ColumnName, values, true)
-}
-
-func (c PtrColumn[T]) FuzzyIn(values []T) fuzzyQueryOption[T] {
-	return newFuzzyQueryOption(c.ColumnName, values)
-}
-
-func (c PtrColumn[T]) Update(value T) updateOption[T] {
-	return newUpdateOption(c.ColumnName, value)
+	columnBase[*T]
 }
 
 // NewPtrColumn creates a new PtrColumn of type T.
 func NewPtrColumn[T any](v T) PtrColumn[T] {
 	return PtrColumn[T]{
-		ColumnValue: ColumnValue[*T]{
-			V: &v,
+		columnBase: columnBase[*T]{
+			ColumnValue: ColumnValue[*T]{
+				V: &v,
+			},
 		},
 	}
 }
 
-// Column represents a column of a table.
-type Column[T any] struct {
-	ColumnValue[T]
-	ColumnName
-}
-
-func (c Column[T]) reflectValue() reflect.Value {
-	return reflect.ValueOf(*new(T))
-}
-
-func (c Column[T]) EQ(value any) OpOption {
-	return newOpOption[T](value, OpEq, c.ColumnName)
-}
-
-func (c Column[T]) NE(value any) OpOption {
-	return newOpOption[T](value, OpNe, c.ColumnName)
-}
-
-func (c Column[T]) GT(value any) OpOption {
-	return newOpOption[T](value, OpGt, c.ColumnName)
-}
-
-func (c Column[T]) LT(value any) OpOption {
-	return newOpOption[T](value, OpLt, c.ColumnName)
-}
-
-func (c Column[T]) GTE(value any) OpOption {
-	return newOpOption[T](value, OpGte, c.ColumnName)
-}
-
-func (c Column[T]) LTE(value any) OpOption {
-	return newOpOption[T](value, OpLte, c.ColumnName)
-}
-
-func (c Column[T]) In(values []T) rangeQueryOption[T] {
+func (c PtrColumn[T]) In(values []T) RangeQueryOption {
 	return newRangeQueryOption(c.ColumnName, values, false)
 }
 
-func (c Column[T]) NotIn(values []T) rangeQueryOption[T] {
+func (c PtrColumn[T]) NotIn(values []T) RangeQueryOption {
 	return newRangeQueryOption(c.ColumnName, values, true)
 }
 
-func (c Column[T]) FuzzyIn(values []T) fuzzyQueryOption[T] {
+func (c PtrColumn[T]) FuzzyIn(values []T) FuzzyQueryOption {
 	return newFuzzyQueryOption(c.ColumnName, values)
 }
 
-func (c Column[T]) Update(value T) updateOption[T] {
-	return newUpdateOption(c.ColumnName, value)
+// Column represents a column of a table.
+type Column[T any] struct {
+	columnBase[T]
 }
 
 // NewColumn creates a new Column of type T.
 func NewColumn[T any](v T) Column[T] {
 	return Column[T]{
-		ColumnValue: ColumnValue[T]{
-			V: v,
+		columnBase: columnBase[T]{
+			ColumnValue: ColumnValue[T]{
+				V: v,
+			},
 		},
 	}
 }
